@@ -1,0 +1,10 @@
+pub mod hakkinda;
+pub mod paint;
+pub mod explorer;
+pub mod regedit;
+pub mod gorevmgr;
+pub mod notepad;
+pub mod cmd;
+pub mod resim;
+pub mod hesap;
+pub mod ayarlar;

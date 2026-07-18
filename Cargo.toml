@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "common",
+    "kernel",
+    "boot"
+]
+
+exclude = ["userland"]
+
+[profile.dev]
+debug-assertions = false
+overflow-checks = false
+
+[profile.release]
+panic = "abort"

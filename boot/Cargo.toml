@@ -1,0 +1,10 @@
+[package]
+name = "boot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+common = { path = "../common" }
+uefi = { version = "0.38", features = ["alloc", "global_allocator"] }
+log = "0.4"
+arrayvec = { version = "0.7", default-features = false }

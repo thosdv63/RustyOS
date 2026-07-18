@@ -1,0 +1,10 @@
+/target
+**/target
+*.img
+*.iso
+*.fd
+*.elf
+*.bin
+*.efi
+kernel/src/kernel/rpe/payload/
+kernel/src/win7.raw

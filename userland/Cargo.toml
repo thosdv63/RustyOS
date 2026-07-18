@@ -1,0 +1,22 @@
+[package]
+name = "userland"
+version = "0.1.0"
+edition = "2021"
+
+
+# BURA EKLENDİ: Derlenecek ana dosyanın adını ve yolunu açıkça belirtiyoruz
+[[bin]]
+name = "core"
+path = "src/core/main.rs"
+
+[dependencies]
+# Eğer ortak yapılar (struct'lar, syscall numaraları) kullanacaksan common'ı bağlayabilirsin
+common = { path = "../common" }
+spin = "0.12.1"
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "z"     # Boyutu olabildiğince küçültür
