@@ -1,4 +1,3 @@
-// BMP coz/olustur (24/32-bit sikistirmasiz)
 use alloc::vec::Vec;
 use alloc::vec;
 
