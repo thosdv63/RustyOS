@@ -24,7 +24,6 @@ mod fs;
 use kernRenderer::Renderer;
 
 static mut RENDERER: Option<Renderer> = None;
-pub static WIN7_STARTUP_SOUND: &[u8] = include_bytes!("win7.raw");
 static BOOT_ANIM_ACTIVE: AtomicBool = AtomicBool::new(false);
 static BOOT_ANIM_TICK: AtomicU64 = AtomicU64::new(0);
 const ANIM_TICK_BOL: u64 = 80;
@@ -52,7 +51,7 @@ pub fn sysinfo_fill(p: *mut u32) {
         let t = SYS_TICKS.load(Ordering::Relaxed);
         let po = POLL_COUNT.load(Ordering::Relaxed);
         let dt = t.saturating_sub(LT);
-        if dt >= 20 { // ~her guncelleme penceresi
+        if dt >= 20 {
             let dp = po.saturating_sub(LP);
             let rate = dp * 100 / dt;
             if rate > MAXR { MAXR = rate; }
@@ -72,7 +71,6 @@ pub unsafe fn renderer() -> &'static mut Renderer {
 }
 
 pub fn boot_anim_irq_tick() {
-    // ses durdurma irq si
     SYS_TICKS.fetch_add(1, Ordering::Relaxed);
     drivers::audio::tick();
 
@@ -218,7 +216,7 @@ fn play_boot_animation(renderer: &mut Renderer, w: usize, h: usize) {
     for _ in 0..160 {
         update_boot_anim();
         renderer.set_color(0x00FF8020);
-        renderer.text_at(w / 2 - 165, h - 40, "Rusty Baslatiliyor...");
+        renderer.text_at(w / 2 - 165, h - 40, "Rusty Starting...");
         boot_delay_ms(10);
     }
     boot_delay_ms(30);
@@ -245,7 +243,7 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     renderer.set_color(0x00FFFFFF);
 
     renderer.set_color(0x00FF8020);
-    renderer.text_at(fb.width as usize / 2 - 165, fb.height as usize - 40, "Rusty Baslatiliyor...");
+    renderer.text_at(fb.width as usize / 2 - 165, fb.height as usize - 40, "Rusty Starting...");
 
     let rpe_mode = unsafe { (*boot_info).rpe_mode } != 0;
     kernel::rpe::set_mode(rpe_mode);
@@ -363,13 +361,13 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
                 kernel::rgst::CACHE_DESKTOP.store(renk, core::sync::atomic::Ordering::Relaxed);
             }
         }
-        kernel::rpe::loading_progress(80);   // YENI
+        kernel::rpe::loading_progress(80); 
 
         if !kernel::rpe::is_rpe() {
             kernel::rgst::recovery::set_embedded_core(EMBEDDED_USERLAND);
             let missing = kernel::rgst::recovery::check();
             if !missing.is_empty() {
-                kernel::rgst::recovery::run(&missing); // geri donmez -> reboot
+                kernel::rgst::recovery::run(&missing);
             }
         }
     }
@@ -411,7 +409,7 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     }
     unsafe { crate::BACK_BUFFER_ADDR = back_buffer; }
     let bb_mb = ((fb.stride * fb.height * 4) / (1024 * 1024) + 1) as u32;
-    USED_RAM_MB.store(20 + bb_mb, Ordering::Relaxed); // kernel+pcm+heap+userheap tahmini + backbuffer
+    USED_RAM_MB.store(20 + bb_mb, Ordering::Relaxed); 
     renderer.clear(0x00000000);
 
     let user_code: u64 = 0x400000;
@@ -430,7 +428,7 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
         Some(d) => d,
         None => {
             renderer.set_color(0x00FF3030);
-            renderer.text("\n\n   KRITIK HATA: RSYS/CORE.BIN BULUNAMADI!\n   Sistem dosyalari eksik veya silinmis.\n   Rusty baslatilamiyor.\n");
+            renderer.text("\n\n   CRITICAL ERROR: RSYS/CORE.BIN DOESNT EXIST!\n   System files missing or deleted.\n   Rusty Starting.\n");
             loop { unsafe { core::arch::asm!("hlt"); } }
         }
     };
