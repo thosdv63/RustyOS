@@ -104,7 +104,7 @@ fn finalize(r: &Renderer, w: usize, h: usize, name: &str, pass: &str, renk: usiz
     bg(r, w, h);
     let msg = "Hazirlaniyor...";
     r.draw_text(msg, w / 2 - msg.len() * 14 / 2, h / 2 - 8, 0x00FFE8C8, 2);
-    r.draw_text("A", 20, 20, 0x0000FF00, 3);   // A
+   // r.draw_text("A", 20, 20, 0x0000FF00, 3);   // A
     r.present();
 
     let _ = syscall::sys_create_dir("Users");
@@ -121,7 +121,7 @@ fn finalize(r: &Renderer, w: usize, h: usize, name: &str, pass: &str, renk: usiz
             if nm.eq_ignore_ascii_case(name) { var = true; break; }
         }
     }
-    r.draw_text("B", 60, 20, 0x0000FF00, 3);    // B
+  //  r.draw_text("B", 60, 20, 0x0000FF00, 3);    // B
     r.present();
 
     if !var {
@@ -130,7 +130,7 @@ fn finalize(r: &Renderer, w: usize, h: usize, name: &str, pass: &str, renk: usiz
         let _ = syscall::sys_create_dir(&format!("Users/{}/Documents", name));
         let _ = syscall::sys_create_dir(&format!("Users/{}/Downloads", name));
     }
-    r.draw_text("C", 100, 20, 0x0000FF00, 3);   // C
+   // r.draw_text("C", 100, 20, 0x0000FF00, 3);   // C
     r.present();
 
     let _ = syscall::sys_reg_set_line(&format!("Oturum/AktifKullanici=str:{}", name));
@@ -141,15 +141,15 @@ fn finalize(r: &Renderer, w: usize, h: usize, name: &str, pass: &str, renk: usiz
     let _ = syscall::sys_reg_set_line("Kullanicilar/Shared/AnaKlasor=str:Users/Shared");
     let _ = syscall::sys_reg_set_line("Kullanicilar/Shared/Yetki=u32:1");
     let _ = syscall::sys_reg_set_line(&format!("Sistem/Masaustu/Renk=u32:{}", RENKLER[renk]));
-    r.draw_text("D", 140, 20, 0x0000FF00, 3);   // D
+   // r.draw_text("D", 140, 20, 0x0000FF00, 3);   // D
     r.present();
 
     let _ = syscall::sys_reg_set_line("Oturum/IlkKurulumBitti=bool:1");
-    r.draw_text("E", 180, 20, 0x0000FF00, 3);   // E
+   // r.draw_text("E", 180, 20, 0x0000FF00, 3);   // E
     r.present();
 
     bekle_1sn();
-    r.draw_text("F", 220, 20, 0x0000FF00, 3);   // F
+ //   r.draw_text("F", 220, 20, 0x0000FF00, 3);   // F
     r.present();
 }
 
