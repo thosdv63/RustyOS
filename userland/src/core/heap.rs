@@ -1,9 +1,8 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
 
-// === Heap ayarlari ===
-// Kernel'in BIZE map ettigi bolge (0x2000_0000, 1MB). Userland map YAPAMAZ.
-pub const HEAP_START: u64 = 0x_5000_0000_0000; // kernel ile AYNI
+// kernel mapped this area for us
+pub const HEAP_START: u64 = 0x_5000_0000_0000; // same
 pub const HEAP_SIZE: usize = 1024 * 1024; // 1 MB
 
 struct FreeBlock {
@@ -93,7 +92,6 @@ unsafe impl GlobalAlloc for LockedHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let mut heap = self.head.lock();
 
-        // Ilk kullanim: bellek ZATEN map'li (kernel yapti), sadece bos blok olarak ekle
         if !heap.initialized {
             heap.init(HEAP_START as usize, HEAP_SIZE);
         }
