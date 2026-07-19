@@ -106,7 +106,6 @@ fn wait_confirm() -> bool {
     }
 }
 
-// Sadece secilebilir satirlar arasinda gezer
 fn partition_select(rows: &[Row]) -> Option<usize> {
     let mut sel = rows.iter().position(|r| r.selectable)?;
     loop {
@@ -125,7 +124,6 @@ fn partition_select(rows: &[Row]) -> Option<usize> {
     }
 }
 
-// Kurulum: gomulu payload -> secilen bolum + ESP. USB gerekmez.
 fn do_install(row: &Row, cb: &mut dyn FnMut(usize, u32)) -> Result<(), &'static str> {
     let sectors32 = row.sectors.min(u32::MAX as u64) as u32;
     let total = match row.disk_kind {
@@ -137,7 +135,6 @@ fn do_install(row: &Row, cb: &mut dyn FnMut(usize, u32)) -> Result<(), &'static 
     install::install(&mut pdev, sectors32, row.disk_kind, esp, cb)
 }
 
-// Tum disklerin GPT'sini okuyup UI satirlarini olustur
 fn build_rows() -> Vec<Row> {
     let mut rows = Vec::new();
     if let Some((bs, bc)) = crate::drivers::storage::nvme::info() {

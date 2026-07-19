@@ -39,29 +39,22 @@ fn draw_cursor(r: &Renderer, mx: usize, my: usize) {
     }}
 }
 
-// Linker'in tanimladigi semboller: .bss'in siniri
 unsafe extern "C" {
     static __bss_start: u8;
     static _end: u8;
 }
 
-// raw binary'de .bss dosyada yok; cold boot'ta QEMU RAM'i sifirladigi
-// icin sans eseri calisiyordu. Warm reboot'ta RAM eski oturumun copuyle
-// dolu -> statikler (ozellikle heap allocator durumu) bozuk basliyordu.
-// Ilk is: .bss'i ELLE sifirla. Sonra stack hizala, main'i cagir.
 #[no_mangle]
 #[link_section = ".text._start"]
 #[unsafe(naked)]
 pub unsafe extern "C" fn _start() -> ! {
     naked_asm!(
-        // === .bss sifirlama ===
         "cld",
         "lea rdi, [rip + {bss_s}]",
         "lea rcx, [rip + {bss_e}]",
         "sub rcx, rdi",
         "xor eax, eax",
         "rep stosb",
-        // === stack hizala + main ===
         "and rsp, -16",
         "xor ebp, ebp",
         "call {m}",
@@ -88,7 +81,6 @@ extern "C" fn userland_main() -> ! {
     let mut mx: i32 = (width / 2) as i32;
     let mut my: i32 = (height / 2) as i32;
 
-    // === OOBE (kurulmamissa) + LOGIN ===
     if ui::oobe::needed() { ui::oobe::run(&r, width as usize, height as usize); }
     ui::login::run(&r, width as usize, height as usize);
 
@@ -109,7 +101,6 @@ extern "C" fn userland_main() -> ! {
     draw_cursor(&r, mx as usize, my as usize);
     r.present();
 
-    // BU kapanınca GPF gelmiyor bu olunca gpf geliyor sesde döngüye giriyor
     syscall::sys_play_startup();
 
     let mut event: [i32; 4] = [0; 4];

@@ -1,4 +1,4 @@
-# === Değişkenler ===
+
 KERNEL_TARGET = x86_64-unknown-none
 BOOT_TARGET = x86_64-unknown-uefi
 KERNEL_BIN = target/$(KERNEL_TARGET)/debug/kernel
@@ -11,19 +11,18 @@ ISO_IMG = rusty.iso
 
 all: run
 
-# === Userland: derle + core.bin uret ===
-# === Userland: derle + core.bin uret ===
+
 userland:
 	cd userland && cargo build --release --target x86_64-unknown-none && rust-objcopy -O binary target/x86_64-unknown-none/release/core core.bin
 	test -f userland/core.bin || (echo "HATA: userland/core.bin uretilemedi!" && exit 1)
 
-# === Kernel: cache temizle + derle (include_bytes taze core.bin alsin) ===
+
 kernel: userland
 	rm -f $(KERNEL_BIN)
 	rm -f target/x86_64-unknown-none/debug/deps/kernel-*
 	cargo build --package kernel --target x86_64-unknown-none
 
-# === Bootloader ===
+
 boot:
 	cargo build --package boot --target $(BOOT_TARGET)
 
@@ -88,10 +87,10 @@ run: image
 		-device usb-storage,bus=xhci.0,drive=usbstick \
 		-display gtk,zoom-to-fit=on
 	
-# ================= RPE / GPT TEST =================
+
 NVME_GPT := nvme_disk.img
 
-# Ortak QEMU ayarlari (tekrari onler)
+
 QEMU := qemu-system-x86_64 -machine q35,accel=kvm:tcg -cpu Skylake-Client -smp 4 -m 2048M \
 	-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
 	-drive if=pflash,format=raw,file=/tmp/ovmf_vars.fd \
@@ -100,7 +99,7 @@ QEMU := qemu-system-x86_64 -machine q35,accel=kvm:tcg -cpu Skylake-Client -smp 4
 	-device AC97,audiodev=snd0 \
 	-device qemu-xhci,id=xhci
 
-# Kurulum USB'si: HEM boot dosyalari HEM PAYLOAD (kurulacak kopyalar)
+
 PAYLOAD_DIR := kernel/src/kernel/rpe/payload
 
 rpe-usb: userland
@@ -155,7 +154,7 @@ gpt-disk: boot
 	sudo losetup -d $$LOOP; \
 	echo ">>> GPT disk hazir: 1=ESP 2=MSR 3=Windows 4=Linux 5=RUSTY(hedef)"
 
-# RPE'yi USB'den boot et (bootindex=0 -> USB once), GPT disk hedef
+
 run-rpe: rpe-usb gpt-disk
 	cp $(OVMF_VARS) /tmp/ovmf_vars.fd
 	$(QEMU) \
@@ -166,7 +165,7 @@ run-rpe: rpe-usb gpt-disk
 		-device usb-storage,bus=xhci.0,drive=usb,bootindex=0 \
 		-display gtk,zoom-to-fit=on
 
-# Kurulmus sistemi boot et (USB yok, usb-kbd/mouse ile OOBE)
+
 run-installed:
 	cp $(OVMF_VARS) /tmp/ovmf_vars.fd
 	$(QEMU) \
