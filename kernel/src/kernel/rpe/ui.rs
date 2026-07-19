@@ -12,11 +12,11 @@ pub const K_ENTER: u8 = 5;
 pub const K_ESC: u8 = 6;
 
 const ITEMS: [&str; 5] = [
-    "Bolum bicimlendiriliyor",
-    "Onyukleyici kopyalaniyor",
-    "Cekirdek kopyalaniyor",
-    "Sistem dosyalari yaziliyor",
-    "Tamamlaniyor",
+    "Formatting partition", 
+    "Copying bootloader", 
+    "Copying kernel", 
+    "Writing system files", 
+    "Completing",
 ];
 
 
@@ -63,7 +63,7 @@ pub fn flush_kbd() {
         drain();
         wait_ib(); cmd.write(0xD4u8);
         wait_ib(); data.write(0xF5u8);
-        for _ in 0..200_000 { core::hint::spin_loop(); } // ACK icin kisa bekle
+        for _ in 0..200_000 { core::hint::spin_loop(); } // wait for ACK
         drain();
         wait_ib(); cmd.write(0xA7u8);
         drain();
@@ -91,7 +91,7 @@ fn cmos(reg: u8) -> u8 {
 }
 fn rtc_sec() -> u8 {
     let mut g = 0u32;
-    while cmos(0x0A) & 0x80 != 0 { g += 1; if g > 5_000_000 { break; } } // guncelleme bitsin
+    while cmos(0x0A) & 0x80 != 0 { g += 1; if g > 5_000_000 { break; } }
     cmos(0x00)
 }
 pub fn wait_1s() {
@@ -172,7 +172,7 @@ fn text_center(cx: usize, y: usize, s: &str, col: u32) {
 }
 
 pub fn welcome() {
-    let (px, py, pw, ph) = panel("Rusty Kurulum");
+    let (px, py, pw, ph) = panel("Rusty Setup");
     let cx = px + pw / 2;
     text_center(cx, py + ph / 2 - 70, "Rusty OS", 0x00E0600A);
     text_center(cx, py + ph / 2 - 30, "Welcome to Setup", 0x00202020);
@@ -184,7 +184,7 @@ pub fn partition_screen(rows: &[Row], sel: usize) {
     let (px, py, pw, ph) = panel("Where do you want to install Rusty?");
     let r = unsafe { crate::renderer() };
     r.set_color(0x00303030);
-    r.text_at(px + 16, py + 2, "Select a partition. [PROTECTED] partitions cannot be modified.");
+    r.text_at(px + 16, py + 2, "Select a partition. protected partitions can't be modified.");
 
     let row_h = 42usize;
     let top = py + 30;
@@ -227,13 +227,13 @@ pub fn partition_screen(rows: &[Row], sel: usize) {
 pub fn confirm_part(row: &Row) {
     let (px, py, pw, ph) = panel("FINAL APPROVAL - ATTENTION");
     let cx = px + pw / 2;
-    text_center(cx, py + 24, "This partition will be formatted and Rusty will be installed:", 0x00303030);
+    text_center(cx, py + 24, "Partition will be formatted and Rusty will be installed:", 0x00303030);
     text_center(cx, py + 62, row.line1.trim(), 0x00B02020);
     text_center(cx, py + 92, &row.line2, 0x00404040);
-    text_center(cx, py + ph / 2 + 20, "Other partitions (Windows/Linux/EFI) will NOT be touched.", 0x002E7D32);
-    text_center(cx, py + ph / 2 + 50, "But ALL data in this partition will be deleted!", 0x00B02020);
+    text_center(cx, py + ph / 2 + 20, "Other partitions will NOT be touched.", 0x002E7D32);
+    text_center(cx, py + ph / 2 + 50, "ALL data in this partition will be deleted!", 0x00B02020);
     text_center(cx, py + ph - 40, "ENTER: INSTALL       ESC: Cancel", 0x00204080);
-    wait_1s();   // <-- 1 sn tus kabul etme (guvenlik)
+    wait_1s();
     drain();
 }
 
@@ -279,7 +279,6 @@ pub fn debug_key_loop() -> ! {
         let s = unsafe { st.read() };
         if s & 0x01 != 0 {
             let data = unsafe { dp.read() };
-            // her byte'i hex yaz: [st=XX d=YY]
             let mut buf = String::new();
             let _ = write!(buf, "s{:02X}:d{:02X} ", s, data);
             r.set_color(if s & 0x20 == 0 { 0x0000FF00 } else { 0x00FF4040 }); // keyboard green, mouse red
