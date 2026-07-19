@@ -110,14 +110,14 @@ rpe-usb: userland
 	cargo build --package boot --target x86_64-unknown-uefi
 	cargo build --package kernel --target x86_64-unknown-none
 	@echo ">>> Ham kernel:"; ls -lh $(KERNEL_BIN)
-	# Kurulacak kernel: STRIP (debug sembolleri ~20MB)
+	# STRIP
 	cp $(KERNEL_BIN) /tmp/rusty_pass1.elf
 	strip -s /tmp/rusty_pass1.elf
 	cp $(BOOT_EFI) $(PAYLOAD_DIR)/BOOTX64.EFI
 	cp /tmp/rusty_pass1.elf $(PAYLOAD_DIR)/KERNEL.ELF
 	cp $(USERLAND_BIN) $(PAYLOAD_DIR)/CORE.BIN
 	@echo ">>> Gomulecek payload:"; ls -lh $(PAYLOAD_DIR)/
-	# GECIS 2: RPE kernel (payload gomulu)
+	# RPE Kernel
 	cargo build --package kernel --target x86_64-unknown-none
 	cp $(KERNEL_BIN) /tmp/rusty_rpe.elf
 	strip -s /tmp/rusty_rpe.elf
