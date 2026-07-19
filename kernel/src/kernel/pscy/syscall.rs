@@ -179,7 +179,8 @@ pub extern "C" fn syscall_handler_rust(
             crate::kernel::rgst::fsops::write_file_call(buf)
         },
         18 => { // sys_play_startup: startup sound
-            crate::drivers::audio::play(crate::WIN7_STARTUP_SOUND);
+            // You can add custom startup sound here
+           // crate::drivers::audio::play(crate::STARTUPSOUND);
             0
         },
         19 => { // sys_play_file: buf = [u16 len][path]
