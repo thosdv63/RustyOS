@@ -7,4 +7,3 @@
 *.bin
 *.efi
 kernel/src/kernel/rpe/payload/
-kernel/src/win7.raw
