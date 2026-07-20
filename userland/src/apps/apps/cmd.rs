@@ -13,7 +13,6 @@ const LINE_H: usize = 13;
 const MAX_LINES: usize = 300;
 const MAX_INPUT: usize = 96;
 
-// Klasik cmd 16 renk paleti (color komutu icin)
 const PALETTE: [u32; 16] = [
     0x00000000, 0x00000080, 0x00008000, 0x00008080,
     0x00800000, 0x00800080, 0x00808000, 0x00C0C0C0,
@@ -27,7 +26,7 @@ pub struct Cmd {
     cwd: String,
     fg: u32,
     bg: u32,
-    scroll: usize, // alttan kac satir yukaridayiz
+    scroll: usize, 
     init: bool,
     ver: String,
     vw: usize,
@@ -43,7 +42,6 @@ impl Cmd {
         }
     }
 
-    // ====== yardimcilar ======
     fn out(&mut self, s: &str) {
         for l in s.split('\n') { self.lines.push(String::from(l)); }
         if self.lines.len() > MAX_LINES {
@@ -52,7 +50,7 @@ impl Cmd {
         }
     }
 
-    // sys_list_dir sarici: (isim, kind, boyut). kind: 0 dosya, 1 klasor, 2 surucu
+    // sys_list_dir 
     fn list(path: &str) -> Vec<(String, u8, u32)> {
         let mut buf = vec![0u8; 4096];
         let n = syscall::sys_list_dir(path, &mut buf) as usize;
@@ -76,13 +74,12 @@ impl Cmd {
         for part in p.split('/') {
             if part.is_empty() || part == "." { continue; }
             if part == ".." {
-                if parts.len() > 1 { parts.pop(); } // "C:" hep kalir
+                if parts.len() > 1 { parts.pop(); } // "C:" always
             } else { parts.push(part); }
         }
         parts.join("/")
     }
 
-    // arg -> tam yol (goreceli / mutlak / \ destekli)
     fn resolve(&self, arg: &str) -> String {
         let a = arg.trim().replace('\\', "/");
         let a = a.trim_end_matches('/');
@@ -109,12 +106,12 @@ impl Cmd {
     }
 
     fn startup(&mut self) {
-        // Sistem surucusu (ilk surucu)
+        // System disk (first disk)
         let drives = Self::list("");
         self.cwd = drives.iter().find(|e| e.1 == 2)
             .map(|e| e.0.clone()).unwrap_or_else(|| String::from("C:"));
 
-        // Registry'den ad + surum
+        // Name from registry, version
         let mut dump = vec![0u8; 8192];
         let n = syscall::sys_reg_list(&mut dump) as usize;
         let mut ad = String::from("Rusty OS");
@@ -133,7 +130,6 @@ impl Cmd {
         self.init = true;
     }
 
-    // ====== komut calistirici ======
     fn exec(&mut self, raw: String) {
         let line = raw.trim();
         let echo = format!("{}>{}", self.cwd, line);
@@ -146,7 +142,6 @@ impl Cmd {
         };
         let cmd = head.to_ascii_lowercase();
 
-        // "d:" tek basina = surucu degistir (Windows davranisi)
         if cmd.len() == 2 && cmd.as_bytes()[1] == b':' && cmd.as_bytes()[0].is_ascii_alphabetic() {
             let d = cmd.to_ascii_uppercase();
             if Self::dir_exists(&d) { self.cwd = d; }
@@ -372,7 +367,6 @@ impl Cmd {
     }
 }
 
-// UTF-8 guvenli kirpma (bayt dilimleme paniginden kacinmak icin)
 fn clip(s: &str, n: usize) -> &str {
     match s.char_indices().nth(n) {
         Some((i, _)) => &s[..i],
@@ -394,9 +388,8 @@ impl App for Cmd {
         let cols = (w - 12) / 7;
         let total_rows = (h - 10) / LINE_H;
         if total_rows < 2 || cols < 10 { return; }
-        let view = total_rows - 1; // son satir prompt'un
+        let view = total_rows - 1;
 
-        // scroll'u sinirla
         let max_scroll = self.lines.len().saturating_sub(view);
         if self.scroll > max_scroll { self.scroll = max_scroll; }
 
@@ -409,7 +402,6 @@ impl App for Cmd {
             cy += LINE_H;
         }
 
-        // prompt: kaydirilmissa gosterme (gecmise bakiyoruz)
         if self.scroll == 0 {
             let p = format!("{}>{}_", self.cwd, self.input);
             let cc = p.chars().count();
@@ -439,8 +431,8 @@ impl App for Cmd {
                 true
             }
             AppEvent::Click { x: _, y } => {
-                if *y < 20 { self.scroll += 5; return true; }             // ust kenar: yukari
-                if *y > self.vh as i32 - 20 { // alt kenar: asagi
+                if *y < 20 { self.scroll += 5; return true; }            
+                if *y > self.vh as i32 - 20 { 
                     self.scroll = self.scroll.saturating_sub(5);
                     return true;
                 }
