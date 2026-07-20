@@ -14,7 +14,7 @@ const LIST_TOP: usize = 84;
 const ROW_H: usize    = 22;
 const STATUS_H: usize = 24;
 
-// kind: 0 dosya, 1 klasor, 2 surucu
+// kind: 0 file, 1 folder, 2 disk
 #[derive(Clone)]
 struct Item { name: String, kind: u8, size: u32, dkind: u8 }
 
@@ -134,7 +134,6 @@ impl Explorer {
                     return;
                 }
                 if up.ends_with(".RAW") {
-                    // Ham PCM ses dosyasi -> ses surucusune gonder
                     if syscall::sys_play_file(&self.full(&it.name)) != 0 {
                         self.msg = Some("Ses dosyasi calinamadi.");
                     }
@@ -163,7 +162,6 @@ impl Explorer {
         s
     }
 
-    // (etiket, hedef) - hedef None ise tiklanamaz baslik
     fn nav(&self) -> Vec<(String, Option<String>)> {
         let sys = self.drives.get(0).cloned().unwrap_or(String::from("C:"));
         let mut v: Vec<(String, Option<String>)> = Vec::new();
@@ -305,7 +303,7 @@ impl App for Explorer {
 
         r.fill_rect(x, y, w, h, 0x00FFFFFF);
 
-        // === Toolbar ===
+        // Toolbar
         r.fill_gradient(x, y, w, TOOLBAR_H, 0x00F9F4EF, 0x00E5DACE);
         r.fill_rect(x, y + TOOLBAR_H - 1, w, 1, 0x00C9B9A9);
 
@@ -324,7 +322,6 @@ impl App for Explorer {
             r.draw_text(short, x + 210, y + 13, 0x00A05010, 1);
         }
 
-        // === Adres cubugu ===
         r.fill_gradient(x, y + TOOLBAR_H, w, ADDR_BOT - TOOLBAR_H, 0x00F3EDE7, 0x00E9E1D9);
         let abw = lw + SIDE_W - 160;
         r.fill_rect(x + 8, y + TOOLBAR_H + 3, abw, 22, 0x00FFFFFF);
@@ -338,7 +335,6 @@ impl App for Explorer {
         r.draw_rounded_border(x + w - 146, y + TOOLBAR_H + 3, 138, 22, 3, 0x00C4B4A4);
         r.draw_text("Ara...", x + w - 138, y + TOOLBAR_H + 10, 0x00A89888, 1);
 
-        // === Sol nav paneli ===
         r.fill_gradient(x, y + ADDR_BOT, SIDE_W, status_top - ADDR_BOT, 0x00F7F1EB, 0x00EDE4DA);
         r.fill_rect(x + SIDE_W - 1, y + ADDR_BOT, 1, status_top - ADDR_BOT, 0x00D9C9B9);
         let nav = self.nav();
@@ -359,7 +355,6 @@ impl App for Explorer {
             ny += ROW_H;
         }
 
-        // === Sutun basliklari ===
         let x0 = x + SIDE_W;
         r.fill_gradient(x0, y + ADDR_BOT, lw, LIST_TOP - ADDR_BOT, 0x00FCF8F4, 0x00EDE6DF);
         r.fill_rect(x0, y + LIST_TOP - 1, lw, 1, 0x00D9C9B9);
@@ -371,7 +366,6 @@ impl App for Explorer {
         r.fill_rect(type_x - 10, y + ADDR_BOT + 4, 1, 14, 0x00D9C9B9);
         r.fill_rect(size_x - 10, y + ADDR_BOT + 4, 1, 14, 0x00D9C9B9);
 
-        // === Liste ===
         let rows = (status_top - LIST_TOP) / ROW_H;
         let mut ry = y + LIST_TOP + 2;
         for (i, it) in self.items.iter().enumerate() {
@@ -420,7 +414,6 @@ impl App for Explorer {
             r.draw_text("(bu klasor bos)", x0 + 34, y + LIST_TOP + 10, 0x00A09080, 1);
         }
 
-        // === Durum cubugu ===
         r.fill_gradient(x, y + status_top, w, STATUS_H, 0x00F5EFE9, 0x00E3D9CF);
         r.fill_rect(x, y + status_top, w, 1, 0x00D9C9B9);
         let st = if self.sel >= 0 && (self.sel as usize) < self.items.len() {
@@ -431,7 +424,6 @@ impl App for Explorer {
         };
         r.draw_text(&st, x + 10, y + status_top + 8, 0x00605040, 1);
 
-        // === Sag tik menusu ===
         if self.cm_on {
             let items = self.menu_items();
             let mw = 130usize; let ih = 24usize;
@@ -539,7 +531,6 @@ impl App for Explorer {
                     return true;
                 }
 
-                // Toolbar
                 if *y < TOOLBAR_H as i32 {
                     self.last = -1;
                     if *y >= 6 && *y < 28 {
@@ -551,10 +542,8 @@ impl App for Explorer {
                     return false;
                 }
 
-                // Adres cubugu bandi
                 if *y < ADDR_BOT as i32 { return false; }
 
-                // Sol panel
                 if *x < SIDE_W as i32 && *y < status_top {
                     if self.ren_on { self.ren_on = false; }
                     let nav = self.nav();
@@ -572,7 +561,6 @@ impl App for Explorer {
 
                 if self.ren_on { self.ren_on = false; return true; }
 
-                // Liste
                 if *y >= LIST_TOP as i32 && *y < status_top {
                     let idx = ((*y - LIST_TOP as i32) / ROW_H as i32) as usize;
                     if idx < self.items.len() {
