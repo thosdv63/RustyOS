@@ -106,13 +106,13 @@ this kernel however you like.
 
 ## Türkçe
 
-Rusty OS (sistem içinde **T-OS 3.0** olarak görünür), x86_64 mimarisi için yazılmış,
+Rusty OS (T-OS 3.0), x86_64 mimarisi için yazılmış,
 `no_std` ve bare-metal bir işletim sistemidir. Kendi UEFI önyükleyicisiyle
 başlar; bellek yönetimi, ACPI/APIC, bir zamanlayıcı, depolama ve USB sürücüleri,
 bir FAT32 dosya sistemi, bir kayıt defteri ve ring-3 bir userland içeren tam bir
 çekirdeği ayağa kaldırır ve gerçekten kullanılabilir uygulamalarla dolu, Aero
 tarzı bir masaüstüne ulaşır. Tamamı Rust ile yazılmıştır; Windows 7'nin
-görünümünden ilham alır ve sıcak turuncu bir "Rusty" paletiyle giydirilmiştir.
+görünümünden ilham alır ve sıcak turuncu bir "Rusty" paletiyle tasarlanmıştır.
 
 Ayrıca **Rusty Preinstallation Environment (RPE)** ile birlikte gelir; bu,
 mevcut bir Windows, Linux veya EFI kurulumuna dokunmadan Rusty OS'u gerçek bir
