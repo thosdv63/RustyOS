@@ -9,9 +9,10 @@
 use crate::fs::BlockDevice;
 use crate::drivers::storage::nvme::NvmeBlockDevice;
 use crate::drivers::storage::ahci::AhciBlockDevice;
+use crate::drivers::storage::ide::IdeBlockDevice;
 
 pub struct PartitionDevice {
-    pub kind: u8,       // 0 = NVMe, 1 = SATA (AHCI)
+    pub kind: u8,       // 0 = NVMe, 1 = SATA (AHCI), 2 = IDE (PATA)
     pub start_lba: u64, // first LBA of partition
     pub sectors: u64,   // partition's sector count
 }
@@ -30,7 +31,16 @@ impl BlockDevice for PartitionDevice {
         let abs = self.start_lba + lba;
         match self.kind {
             0 => { let mut d = NvmeBlockDevice; d.read_block(abs, buf) }
-            _ => { let mut d = AhciBlockDevice; d.read_block(abs, buf) }
+            1 => { let mut d = AhciBlockDevice; d.read_block(abs, buf) }
+            2 => {
+                // Bizim yazdığımız IDE sürücüsünü Primary Master olarak çağırıyoruz
+                let mut d = IdeBlockDevice {
+                    channel: crate::drivers::storage::ide::IdeChannel::Primary,
+                    drive_type: crate::drivers::storage::ide::IdeDriveType::Master,
+                };
+                d.read_block(abs, buf)
+            }
+            _ => Err("Unknown disk type (Read denied)"),
         }
     }
 
@@ -41,14 +51,30 @@ impl BlockDevice for PartitionDevice {
         let abs = self.start_lba + lba;
         match self.kind {
             0 => { let mut d = NvmeBlockDevice; d.write_block(abs, buf) }
-            _ => { let mut d = AhciBlockDevice; d.write_block(abs, buf) }
+            1 => { let mut d = AhciBlockDevice; d.write_block(abs, buf) }
+            2 => {
+                let mut d = IdeBlockDevice {
+                    channel: crate::drivers::storage::ide::IdeChannel::Primary,
+                    drive_type: crate::drivers::storage::ide::IdeDriveType::Master,
+                };
+                d.write_block(abs, buf)
+            }
+            _ => Err("Unknown disk type (Write denied)"),
         }
     }
 
     fn block_size(&self) -> u32 {
         match self.kind {
             0 => NvmeBlockDevice.block_size(),
-            _ => AhciBlockDevice.block_size(),
+            1 => AhciBlockDevice.block_size(),
+            2 => {
+                let d = IdeBlockDevice {
+                    channel: crate::drivers::storage::ide::IdeChannel::Primary,
+                    drive_type: crate::drivers::storage::ide::IdeDriveType::Master,
+                };
+                d.block_size()
+            }
+            _ => 512,
         }
     }
 }
