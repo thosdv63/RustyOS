@@ -63,10 +63,14 @@ fn sniff_fs(dev: &mut dyn BlockDevice, first_lba: u64) -> u8 {
     let mut b = [0u8; 512];
     if dev.read_block(first_lba, &mut b).is_err() { return FS_UNKNOWN; }
     if &b[3..7] == b"NTFS" { return FS_NTFS; }
-    if &b[3..11] == b"EXFAT   " { return FS_NTFS; } // exFAT -> veri kabul et, koru
+    if &b[3..11] == b"EXFAT   " { return FS_NTFS; }
     if &b[82..87] == b"FAT32" { return FS_FAT; }
     if &b[54..57] == b"FAT" { return FS_FAT; }      // FAT12/16
-    if b.iter().all(|&x| x == 0) { return FS_EMPTY; }
+    
+    if b.iter().all(|&x| x == 0) || b[510] != 0x55 || b[511] != 0xAA {
+        return FS_EMPTY;
+    }
+
     FS_UNKNOWN
 }
 
@@ -79,13 +83,13 @@ fn classify(tg: &[u8; 16], fs: u8) -> (&'static str, bool) {
     if tg == &G_LINUXSWAP { return ("Linux Swap",         true); }
     if tg == &G_MSDATA {
         return match fs {
-            FS_NTFS  => ("Windows (NTFS)", true),  // PROTECT
-            FS_FAT   => ("FAT32 (bos)",    false), // CAN SELECT
-            FS_EMPTY => ("Bos (Basic)",    false), // CAN SELECT
-            _        => ("Bilinmeyen veri",true),  // PROTECT
+            FS_NTFS  => ("Windows (NTFS)", true),  
+            FS_FAT   => ("FAT32 (bos)",    false), 
+            FS_EMPTY => ("Bos (Basic)",    false), 
+            _        => ("Kurulabilir Alan", false),
         };
     }
-    ("Bilinmeyen", true) // PROTECT
+    ("Bilinmeyen", true)
 }
 
 pub fn read_disk(dev: &mut dyn BlockDevice, total_sectors: u64) -> DiskLayout {
