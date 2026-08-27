@@ -25,7 +25,7 @@ CPU just wrote.
 
 ## Storage
 
-Rusty OS drives two kinds of disk. The NVMe driver, in `drivers/storage/nvme`,
+Rusty OS drives three kinds of disk. The NVMe driver, in `drivers/storage/nvme`,
 resets the controller, sets up admin and I/O submission and completion queues in
 DMA memory, and issues commands by writing entries and ringing doorbells; it
 identifies the namespace to learn the block size and count, then reads and writes
@@ -33,8 +33,11 @@ blocks by polling the completion queue. The AHCI driver, in `drivers/storage/ahc
 handles SATA disks through command lists, FIS structures, and physical-region
 descriptor tables, finding the first port with an attached drive and issuing READ
 and WRITE DMA commands.
+The IDE ATA drive in `drivers/storage/ide` executes READ and WRITE commands via PIO,
+with Master and Slave support depending on whether it is Native PCI or
+Legacy/Compatible.
 
-Both present the same small interface — a `BlockDevice` trait with read, write, and
+All three present same small interface — a `BlockDevice` trait with read, write, and
 block-size operations — so the filesystem layer above doesn't care which kind of
 disk it's talking to.
 
