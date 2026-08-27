@@ -128,7 +128,9 @@ fn do_install(row: &Row, cb: &mut dyn FnMut(usize, u32)) -> Result<(), &'static 
     let sectors32 = row.sectors.min(u32::MAX as u64) as u32;
     let total = match row.disk_kind {
         0 => crate::drivers::storage::nvme::info().map(|(_, bc)| bc).unwrap_or(0),
-        _ => crate::drivers::storage::ahci::info().map(|(_, bc)| bc).unwrap_or(0),
+        1 => crate::drivers::storage::ahci::info().map(|(_, bc)| bc).unwrap_or(0),
+        2 => crate::drivers::storage::ide::info().map(|(_, bc)| bc).unwrap_or(0),
+        _ => 0,
     };
     let esp = gpt::find_esp(row.disk_kind, total);
     let mut pdev = crate::fs::offset::PartitionDevice::new(row.disk_kind, row.first_lba, row.sectors);
@@ -142,6 +144,9 @@ fn build_rows() -> Vec<Row> {
     }
     if let Some((bs, bc)) = crate::drivers::storage::ahci::info() {
         push_disk(&mut rows, 1, "SATA Disk", bs, bc);
+    }
+    if let Some((bs, bc)) = crate::drivers::storage::ide::info() {
+        push_disk(&mut rows, 2, "IDE Disk", bs, bc);
     }
     rows
 }
