@@ -88,19 +88,20 @@ pub extern "C" fn syscall_handler_rust(
             0
         },
         3 => { // sys_poll_event
-            let real_ptr = arg1 as *mut i32;
-            crate::drivers::usb::xhci::poll();
-            crate::POLL_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-            crate::drivers::audio::tick(); // close stream when sound end
-            unsafe {
-                match crate::kernel::pscy::event::pop() {
-                    Some(ev) => {
-                        core::ptr::write(real_ptr, ev.kind as i32);
-                        core::ptr::write(real_ptr.add(1), ev.data1);
-                        core::ptr::write(real_ptr.add(2), ev.data2);
-                        core::ptr::write(real_ptr.add(3), ev.data3);
-                        1
-                    }
+                let real_ptr = arg1 as *mut i32;
+                crate::drivers::usb::xhci::poll();
+                unsafe { crate::drivers::ps2::mouse::poll(); }
+                crate::POLL_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                crate::drivers::audio::tick(); // close stream when sound end
+                unsafe {
+                    match crate::kernel::pscy::event::pop() {
+                        Some(ev) => {
+                            core::ptr::write(real_ptr, ev.kind as i32);
+                            core::ptr::write(real_ptr.add(1), ev.data1);
+                            core::ptr::write(real_ptr.add(2), ev.data2);
+                            core::ptr::write(real_ptr.add(3), ev.data3);
+                            1
+                        }
                     None => 0,
                 }
             }
