@@ -336,6 +336,17 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
                 }
             }
 
+            if let Some((bs, bc)) = drivers::storage::ide::info() {
+                if letter <= b'Z' {
+                    if let Some(fs) = kernel::rpe::gpt::mount_fat_smart(2, bs, bc) {
+                        let mb = (bc * (bs as u64) / (1024 * 1024)) as u32;
+                        if kernel::rgst::drive_count() == 0 { kernel::rgst::set_fs(fs.clone()); }
+                        kernel::rgst::add_drive(letter, "Yerel Disk (IDE)", 0, mb, fs);
+                        letter += 1;
+                    }
+                }
+            }
+
             let usb_n = drivers::usb::storage::count();
             for i in 0..usb_n {
                 if letter > b'Z' { break; }
