@@ -51,6 +51,13 @@ unsafe fn mouse_wait(type_bit: u8) {
     }
 }
 
+pub unsafe fn poll() {
+    let mut status_port = Port::<u8>::new(0x64);
+    while (status_port.read() & 0x21) == 0x21 {
+        handle_interrupt();
+    }
+}
+
 unsafe fn mouse_write(cmd: u8) {
     mouse_wait(1);
     Port::<u8>::new(0x64).write(0xD4); // specify that we will send a command to the mouse
