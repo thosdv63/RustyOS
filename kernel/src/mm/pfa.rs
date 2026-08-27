@@ -1,15 +1,19 @@
-use common::bootinfo::{BootInfo};
+use common::bootinfo::BootInfo;
 use core::slice;
+use x86_64::structures::paging::{FrameAllocator as X86FrameAllocator, PhysFrame, Size4KiB};
+use x86_64::PhysAddr;
 
-const FRAME_SIZE: u64 = 4096; // 4KB
+const FRAME_SIZE: u64 = 4096;
+const MAX_RAM: u64 = 0x1_0000_0000;
+const DMA_SAFE_START_FRAME: u64 = 0x500000 / FRAME_SIZE;
 
-// Global bitmap structure
 pub struct FrameAllocator {
-    bitmap: *mut u8,       // bitmap address (each bit is a frame)
-    bitmap_size: usize,    // bitmap size (byte)
-    total_frames: u64,     // total frames
-    used_frames: u64,      // used
-    highest_addr: u64,     
+    bitmap: *mut u8,
+    bitmap_size: usize,
+    total_frames: u64,
+    used_frames: u64,
+    highest_addr: u64,
+    last_alloc_frame: u64,
 }
 
 static mut ALLOCATOR: FrameAllocator = FrameAllocator {
@@ -18,24 +22,21 @@ static mut ALLOCATOR: FrameAllocator = FrameAllocator {
     total_frames: 0,
     used_frames: 0,
     highest_addr: 0,
+    last_alloc_frame: DMA_SAFE_START_FRAME,
 };
 
-// Bitmap helpers
-// frame number -> fill mark on bitmap
 unsafe fn set_used(frame: u64) {
     let byte = (frame / 8) as usize;
     let bit = (frame % 8) as u8;
     *ALLOCATOR.bitmap.add(byte) |= 1 << bit;
 }
 
-// frame number -> mark as empty on bitmap
 unsafe fn set_free(frame: u64) {
     let byte = (frame / 8) as usize;
     let bit = (frame % 8) as u8;
     *ALLOCATOR.bitmap.add(byte) &= !(1 << bit);
 }
 
-// is frame full?
 unsafe fn is_used(frame: u64) -> bool {
     let byte = (frame / 8) as usize;
     let bit = (frame % 8) as u8;
@@ -59,12 +60,9 @@ pub fn init(boot_info: *const BootInfo) {
             info.memory_region_count as usize,
         );
 
-        const MAX_RAM: u64 = 0x1_0000_0000; // 4 GB
-
         let mut highest: u64 = 0;
         for rg in regions {
             let end = rg.start + rg.page_count * FRAME_SIZE;
-            // Skip areas with very high address values ​​(not actual RAM)
             if rg.start >= MAX_RAM { continue; }
             if end > highest && end <= MAX_RAM { highest = end; }
         }
@@ -75,12 +73,11 @@ pub fn init(boot_info: *const BootInfo) {
         let bitmap_size = (ALLOCATOR.total_frames as usize + 7) / 8;
         ALLOCATOR.bitmap_size = bitmap_size;
 
-        // Find the LARGEST available area and place the bitmap there
         let bitmap_frames_needed = (bitmap_size as u64 + FRAME_SIZE - 1) / FRAME_SIZE;
         let mut bitmap_addr: u64 = 0;
         let mut best_size: u64 = 0;
+        
         for rg in regions {
-            // Under MAX RAM, it's available, and the biggest ever
             if rg.usable == 1 && rg.start < MAX_RAM && rg.page_count > best_size {
                 if rg.page_count >= bitmap_frames_needed {
                     best_size = rg.page_count;
@@ -95,9 +92,7 @@ pub fn init(boot_info: *const BootInfo) {
         }
         ALLOCATOR.bitmap = bitmap_addr as *mut u8;
 
-        for i in 0..bitmap_size {
-            *ALLOCATOR.bitmap.add(i) = 0xFF;
-        }
+        core::ptr::write_bytes(ALLOCATOR.bitmap, 0xFF, bitmap_size);
         ALLOCATOR.used_frames = ALLOCATOR.total_frames;
 
         let mut freed: u64 = 0;
@@ -128,9 +123,7 @@ pub fn init(boot_info: *const BootInfo) {
             ALLOCATOR.used_frames += 1;
         }
 
-        // CRITICAL: Reserve the userland/CORE.BIN region (0x0 - 0x500000)
-        // If DMA takes frames from this region, it will corrupt the running userland (freeze!)
-        let reserve_end = 0x500000u64 / FRAME_SIZE; // frame 1280
+        let reserve_end = 0x500000u64 / FRAME_SIZE;
         for frame in 0..reserve_end {
             if frame >= ALLOCATOR.total_frames { break; }
             if !is_used(frame) {
@@ -138,7 +131,7 @@ pub fn init(boot_info: *const BootInfo) {
                 ALLOCATOR.used_frames += 1;
             }
         }
-        // fallback audio region (0x0100_0000 - 0x0110_0000, 1MB) reserved
+        
         let snd_start = 0x0100_0000u64 / FRAME_SIZE;
         let snd_end   = 0x0110_0000u64 / FRAME_SIZE;
         for frame in snd_start..snd_end {
@@ -148,23 +141,33 @@ pub fn init(boot_info: *const BootInfo) {
                 ALLOCATOR.used_frames += 1;
             }
         }
+
+        ALLOCATOR.last_alloc_frame = DMA_SAFE_START_FRAME;
     }
 }
 
-// Userland code/stack + CORE.BIN + fallback regions: DMA should NEVER fall here.
-// (between 0x000000 - 0x500000 = frame 0..1280 reserved)
-const DMA_SAFE_START_FRAME: u64 = 0x500000 / FRAME_SIZE; // = 1280
-
 pub fn alloc_frame() -> Option<u64> {
     unsafe {
-        let start = DMA_SAFE_START_FRAME;
+        let start = ALLOCATOR.last_alloc_frame;
+        
         for frame in start..ALLOCATOR.total_frames {
             if !is_used(frame) {
                 set_used(frame);
                 ALLOCATOR.used_frames += 1;
+                ALLOCATOR.last_alloc_frame = frame + 1;
                 return Some(frame * FRAME_SIZE);
             }
         }
+
+        for frame in DMA_SAFE_START_FRAME..start {
+            if !is_used(frame) {
+                set_used(frame);
+                ALLOCATOR.used_frames += 1;
+                ALLOCATOR.last_alloc_frame = frame + 1;
+                return Some(frame * FRAME_SIZE);
+            }
+        }
+
         None
     }
 }
@@ -175,12 +178,13 @@ pub fn free_frame(addr: u64) {
         if is_used(frame) {
             set_free(frame);
             ALLOCATOR.used_frames -= 1;
+            
+            if frame < ALLOCATOR.last_alloc_frame && frame >= DMA_SAFE_START_FRAME {
+                ALLOCATOR.last_alloc_frame = frame;
+            }
         }
     }
 }
-
-use x86_64::structures::paging::{FrameAllocator as X86FrameAllocator, PhysFrame, Size4KiB};
-use x86_64::PhysAddr;
 
 pub struct PfaWrapper;
 
