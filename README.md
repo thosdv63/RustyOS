@@ -37,7 +37,7 @@ The kernel stack covers the full path from firmware to desktop:
 |-------|-----------|
 | **Boot** | UEFI bootloader, Windows 7-style boot manager, ELF loader, dual-boot chainloading |
 | **Core** | GDT/TSS, IDT, APIC/LAPIC, ACPI, physical + virtual memory, heap, scheduler |
-| **Drivers** | PCI/HAL, NVMe, AHCI, xHCI (USB), HID, USB mass storage, PS/2, Intel HDA, AC'97, RTC |
+| **Drivers** | PCI/HAL, NVMe, AHCI, IDE (ATA), xHCI (USB), HID, USB mass storage, PS/2, Intel HDA, AC'97, RTC |
 | **Filesystem** | FAT32, a VFS layer, GPT parsing, partition-bounded block devices |
 | **System** | SYSCALL/SYSRET ABI, ring-3 processes, a plain-text registry, a recovery mode |
 | **Userland** | Window manager, taskbar, start menu, OOBE, login, and 10+ built-in apps |
@@ -126,7 +126,7 @@ GPT diske yazabilen, Windows 7 tarzı bir kurulum ortamıdır.
 |--------|-------------|
 | **Önyükleme** | UEFI önyükleyici, Windows 7 tarzı önyükleme yöneticisi, ELF yükleyici, çoklu önyükleme |
 | **Çekirdek** | GDT/TSS, IDT, APIC/LAPIC, ACPI, fiziksel + sanal bellek, heap, zamanlayıcı |
-| **Sürücüler** | PCI/HAL, NVMe, AHCI, xHCI (USB), HID, USB depolama, PS/2, Intel HDA, AC'97, RTC |
+| **Sürücüler** | PCI/HAL, NVMe, AHCI, IDE (ATA), xHCI (USB), HID, USB depolama, PS/2, Intel HDA, AC'97, RTC |
 | **Dosya sistemi** | FAT32, bir VFS katmanı, GPT ayrıştırma, bölüm sınırlı blok aygıtları |
 | **Sistem** | SYSCALL/SYSRET ABI, ring-3 süreçler, düz metin kayıt defteri, kurtarma modu |
 | **Userland** | Pencere yöneticisi, görev çubuğu, başlat menüsü, OOBE, giriş ve 10+ yerleşik uygulama |
