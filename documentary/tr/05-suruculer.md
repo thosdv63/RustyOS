@@ -25,15 +25,18 @@ muazzam önem taşıyan bir disiplin.
 
 ## Depolama
 
-Rusty OS iki tür disk sürer. `drivers/storage/nvme`'deki NVMe sürücüsü, denetleyiciyi
+Rusty OS üç tür disk sürer. `drivers/storage/nvme`'deki NVMe sürücüsü, denetleyiciyi
 sıfırlar, DMA belleğinde admin ve G/Ç gönderim ve tamamlama kuyrukları kurar ve
 girdiler yazıp ziller çalarak komutlar verir; blok boyutunu ve sayısını öğrenmek
 için namespace'i tanımlar, ardından tamamlama kuyruğunu yoklayarak blokları okur ve
 yazar. `drivers/storage/ahci`'deki AHCI sürücüsü, SATA disklerini komut listeleri,
 FIS yapıları ve fiziksel bölge tanımlayıcı tabloları aracılığıyla ele alır; bağlı
-bir sürücüsü olan ilk portu bulur ve READ ile WRITE DMA komutları verir.
+bir sürücüsü olan ilk portu bulur ve READ ile WRITE DMA komutları verir. 
+`drivers/storage/ide`'deki IDE ATA sürücüsü, Native PCI veya
+Legacy/Compatitable olup olmadığına göre Master ve Slave
+destekli şekilde READ ve WRITE komutlarını PIO ile yapar.
 
-İkisi de aynı küçük arayüzü sunar — okuma, yazma ve blok boyutu işlemleri olan bir
+Üçüde de aynı küçük arayüzü sunar — okuma, yazma ve blok boyutu işlemleri olan bir
 `BlockDevice` trait'i — böylece üstteki dosya sistemi katmanı, hangi tür diskle
 konuştuğunu umursamaz.
 
