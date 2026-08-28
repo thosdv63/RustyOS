@@ -57,8 +57,6 @@ image: kernel boot
 	mmd -i usb_disk.img ::/Belgelerim
 	printf "Rusty OS USB testi\n" > /tmp/usb_test.txt
 	mcopy -i usb_disk.img /tmp/usb_test.txt ::/OKUBENI.TXT
-	mcopy -i nvme_disk.img kernel/src/win7.raw ::/SES.RAW
-	mcopy -i sata_disk.img kernel/src/win7.raw ::/SES.RAW
 
 run: image
 	cp $(OVMF_VARS) /tmp/rusty_ovmf_vars.fd
