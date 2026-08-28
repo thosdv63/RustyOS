@@ -3,48 +3,45 @@ use crate::drivers::pci::{self, PciDevice};
 use crate::mm::pfa;
 use core::sync::atomic::{fence, Ordering};
 
-// AHCI HBA (Host Bus Adapter) Register Offsets ===
-const HBA_CAP: u64 = 0x00;     // Host Capabilities
-const HBA_GHC: u64 = 0x04;     // Global Host Control
-const HBA_IS: u64 = 0x08;      // Interrupt Status
-const HBA_PI: u64 = 0x0C;      // Ports Implemented
+// AHCI HBA Register Offsets
+const HBA_CAP: u64 = 0x00;     
+const HBA_GHC: u64 = 0x04;     
+const HBA_IS: u64 = 0x08;      
+const HBA_PI: u64 = 0x0C;    
 
-// Port Register Offsets (for every port)
-// Port N registers: ABAR + 0x100 + N*0x80
-const PORT_CLB: u64 = 0x00;    // Command List Base (64-bit)
-const PORT_FB: u64 = 0x08;     // FIS Base (64-bit)
-const PORT_IS: u64 = 0x10;     // Interrupt Status
-const PORT_IE: u64 = 0x14;     // Interrupt Enable
-const PORT_CMD: u64 = 0x18;    // Command and Status
-const PORT_TFD: u64 = 0x20;    // Task File Data
-const PORT_SIG: u64 = 0x24;    // Signature
-const PORT_SSTS: u64 = 0x28;   // SATA Status
-const PORT_SCTL: u64 = 0x2C;   // SATA Control
-const PORT_SERR: u64 = 0x30;   // SATA Error
-const PORT_CI: u64 = 0x38;     // Command Issue
+// Port Register Offsets
+const PORT_CLB: u64 = 0x00;   
+const PORT_FB: u64 = 0x08;     
+const PORT_IS: u64 = 0x10;    
+const PORT_IE: u64 = 0x14;     
+const PORT_CMD: u64 = 0x18;    
+const PORT_TFD: u64 = 0x20;  
+const PORT_SIG: u64 = 0x24;  
+const PORT_SSTS: u64 = 0x28;   
+const PORT_SCTL: u64 = 0x2C;   
+const PORT_SERR: u64 = 0x30;  
+const PORT_CI: u64 = 0x38;    
 
 // Port CMD bits
-const CMD_ST: u32 = 0x0001;    // Start
-const CMD_FRE: u32 = 0x0010;   // FIS Receive Enable
-const CMD_FR: u32 = 0x4000;    // FIS Receive Running
-const CMD_CR: u32 = 0x8000;    // Command List Running
+const CMD_ST: u32 = 0x0001;   
+const CMD_FRE: u32 = 0x0010;  
+const CMD_FR: u32 = 0x4000;   
+const CMD_CR: u32 = 0x8000;    
 
-// SATA signatures
+// SATA signature
 const SIG_ATA: u32 = 0x00000101; // SATA disk
 
-// Command Header (32 byte)
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct CmdHeader {
-    flags: u16,        // CFL (command FIS length) + flags
-    prdtl: u16,        // PRDT number of entries
-    prdbc: u32,        // number of bytes transferred
-    ctba: u32,         // Command Table base (low)
-    ctba_upper: u32,   // Command Table base (hihh)
+    flags: u16,       
+    prdtl: u16,       
+    prdbc: u32,        
+    ctba: u32,         
+    ctba_upper: u32, 
     _reserved: [u32; 4],
 }
 
-// FIS - Register Host to Device (20 byte)
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FisRegH2D {
@@ -62,50 +59,40 @@ struct FisRegH2D {
     _reserved: [u8; 4],
 }
 
-// PRDT Entry (Physical Region Descriptor)
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct PrdtEntry {
-    dba: u32,          // data base (low)
-    dba_upper: u32,    // data base (high)
+    dba: u32,       
+    dba_upper: u32,    
     _reserved: u32,
-    dbc: u32,          // byte count (bit 0-21) + interrupt bit (bit 31)
+    dbc: u32,          
 }
 
-/* Command Table 
-    0x00: Command FIS (64 byte alan)
-    0x40: ATAPI command (16 byte)
-    0x80: reserved (48 byte)
-    0x80+: PRDT entries */
 const CT_FIS_OFFSET: usize = 0x00;
 const CT_PRDT_OFFSET: usize = 0x80;
 
-// AHCI Driver
 pub struct AhciDevice {
-    abar: u64,             // HBA register address (BAR5)
-    port: u32,             // port number used
-    clb: u64,              // command list base (physical)
-    fb: u64,               // FIS base (physical)
-    ctba: u64,             // command table base (physical)
-    pub block_size: u32,   // blok size (512)
-    pub block_count: u64,  // total blocks
+    abar: u64,             
+    port: u32,           
+    clb: u64,            
+    fb: u64,              
+    ctba: u64,             
+    pub block_size: u32,  
+    pub block_count: u64, 
 }
 
 static mut AHCI: Option<AhciDevice> = None;
 
 impl AhciDevice {
-    // Port register address
     unsafe fn port_reg(&self, offset: u64) -> u64 {
         self.abar + 0x100 + (self.port as u64) * 0x80 + offset
     }
 
-    // Stop port
     unsafe fn stop_port(&self) {
         let mut cmd = mmio_read32(self.port_reg(PORT_CMD));
         cmd &= !CMD_ST;
         cmd &= !CMD_FRE;
         mmio_write32(self.port_reg(PORT_CMD), cmd);
-        // Wait until CR and FR are cleaned
         let mut spin = 0;
         loop {
             let c = mmio_read32(self.port_reg(PORT_CMD));
@@ -116,9 +103,7 @@ impl AhciDevice {
         }
     }
 
-    // Start port
     unsafe fn start_port(&self) {
-        // Make sure CR is clean
         let mut spin = 0;
         while (mmio_read32(self.port_reg(PORT_CMD)) & CMD_CR) != 0 {
             spin += 1;
@@ -131,17 +116,16 @@ impl AhciDevice {
         mmio_write32(self.port_reg(PORT_CMD), cmd);
     }
 
-    // Send a command (read=true read, false write), waith with polling
-    unsafe fn run_command(&mut self, lba: u64, buf_phys: u64, count: u16, write: bool) -> Result<(), &'static str> {
-        // Clean interrupt status
+    unsafe fn run_command(&mut self, lba: u64, pages: &[u64], count: u16, write: bool) -> Result<(), &'static str> {
+        if count == 0 {
+            return Ok(());
+        }
         mmio_write32(self.port_reg(PORT_IS), 0xFFFFFFFF);
 
-        // Set Command Header (slot 0)
         let cmd_header = self.clb as *mut CmdHeader;
         let header = CmdHeader {
-            // CFL = 5 dword (20 byte / 4), Write bit
             flags: (5 & 0x1F) | if write { 1 << 6 } else { 0 },
-            prdtl: 1, // 1 PRDT entry
+            prdtl: pages.len() as u16,
             prdbc: 0,
             ctba: (self.ctba & 0xFFFF_FFFF) as u32,
             ctba_upper: (self.ctba >> 32) as u32,
@@ -149,15 +133,13 @@ impl AhciDevice {
         };
         core::ptr::write_volatile(cmd_header, header);
 
-        // Reset command table
         core::ptr::write_bytes(self.ctba as *mut u8, 0, 256);
 
-        // Fill command FIS (Register H2D)
         let fis = (self.ctba + CT_FIS_OFFSET as u64) as *mut FisRegH2D;
         let cmd_fis = FisRegH2D {
-            fis_type: 0x27,           // Register H2D
-            pmport_c: 1 << 7,         // command finished
-            command: if write { 0x35 } else { 0x25 }, // WRITE DMA EXT / READ DMA EXT
+            fis_type: 0x27,          
+            pmport_c: 1 << 7,        
+            command: if write { 0x35 } else { 0x25 }, 
             featurel: 0,
             lba0: (lba & 0xFF) as u8,
             lba1: ((lba >> 8) & 0xFF) as u8,
@@ -175,20 +157,23 @@ impl AhciDevice {
         };
         core::ptr::write_volatile(fis, cmd_fis);
 
-        // Fill PRDT entry (data addr + size)
-        let prdt = (self.ctba + CT_PRDT_OFFSET as u64) as *mut PrdtEntry;
-        let byte_count = (count as u32) * self.block_size - 1; // 0-based
-        let prdt_entry = PrdtEntry {
-            dba: (buf_phys & 0xFFFF_FFFF) as u32,
-            dba_upper: (buf_phys >> 32) as u32,
-            _reserved: 0,
-            dbc: byte_count & 0x3FFFFF, // bit 0-21
-        };
-        core::ptr::write_volatile(prdt, prdt_entry);
+        let prdt_ptr = (self.ctba + CT_PRDT_OFFSET as u64) as *mut PrdtEntry;
+        let mut remaining_bytes = (count as u32) * self.block_size;
+        
+        for (i, &page_phys) in pages.iter().enumerate() {
+            let bytes_for_this_page = core::cmp::min(remaining_bytes, 4096);
+            let prdt_entry = PrdtEntry {
+                dba: (page_phys & 0xFFFF_FFFF) as u32,
+                dba_upper: (page_phys >> 32) as u32,
+                _reserved: 0,
+                dbc: (bytes_for_this_page - 1) & 0x3FFFFF,
+            };
+            core::ptr::write_volatile(prdt_ptr.add(i), prdt_entry);
+            remaining_bytes -= bytes_for_this_page;
+        }
 
         fence(Ordering::SeqCst);
 
-        // Wait for TFD to be ready (BSY and DRQ need to be cleared)
         let mut spin = 0;
         while (mmio_read32(self.port_reg(PORT_TFD)) & 0x88) != 0 {
             spin += 1;
@@ -196,14 +181,11 @@ impl AhciDevice {
             core::hint::spin_loop();
         }
 
-        // Publish command (slot 0)
         mmio_write32(self.port_reg(PORT_CI), 1);
 
-        // Wait for completion (until the CI bit is cleared)
         spin = 0;
         loop {
             if (mmio_read32(self.port_reg(PORT_CI)) & 1) == 0 { break; }
-            // error checking (ERR bit in TFD)
             if (mmio_read32(self.port_reg(PORT_TFD)) & 0x01) != 0 {
                 return Err("AHCI command error (TFD ERR)");
             }
@@ -216,23 +198,18 @@ impl AhciDevice {
     }
 }
 
-// Setup
 pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
-    // Find AHCI controller in PCI (class 0x01, subclass 0x06)
     let ahci_dev = devices.iter()
         .find(|d| d.class == 0x01 && d.subclass == 0x06)
         .ok_or("AHCI controller not found")?;
 
-    // Enable bus mastering
     pci::enable_bus_master(ahci_dev.bus, ahci_dev.device, ahci_dev.function);
 
-    // ABAR = BAR5 (AHCI register address)
     let abar = pci::read_bar(ahci_dev.bus, ahci_dev.device, ahci_dev.function, 5);
     if abar == 0 {
         return Err("ABAR (BAR5) is zero");
     }
 
-    // Map ABAR
     for i in 0..2u64 {
         let addr = abar + i * 0x1000;
         if crate::mm::ptm::translate(addr).is_none() {
@@ -241,14 +218,11 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
     }
 
     unsafe {
-        // Enable AHCI mode (GHC.AE = bit 31)
         let ghc = mmio_read32(abar + HBA_GHC);
         mmio_write32(abar + HBA_GHC, ghc | (1 << 31));
 
-        // Get ports (PI register)
         let pi = mmio_read32(abar + HBA_PI);
 
-        // Find the first port that has a disk
         let mut found_port: i32 = -1;
         for port in 0..32u32 {
             if (pi & (1 << port)) == 0 { continue; }
@@ -258,7 +232,6 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
             let det = ssts & 0x0F;        // device detection
             let ipm = (ssts >> 8) & 0x0F; // interface power management
 
-            // det=3 (device available + communication), ipm=1 (active)
             if det == 3 && ipm == 1 {
                 let sig = mmio_read32(port_base + PORT_SIG);
                 if sig == SIG_ATA {
@@ -273,7 +246,6 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
         }
         let port = found_port as u32;
 
-        // Get frames for command list, FIS, command table
         let clb = pfa::alloc_frame().ok_or("no CLB frame")?;
         let fb = pfa::alloc_frame().ok_or("no FB frame")?;
         let ctba = pfa::alloc_frame().ok_or("no CT frame")?;
@@ -287,21 +259,17 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
             block_count: 0,
         };
 
-        // Stop port, set addresses, start
         dev.stop_port();
         mmio_write32(dev.port_reg(PORT_CLB), (clb & 0xFFFF_FFFF) as u32);
         mmio_write32(dev.port_reg(PORT_CLB) + 4, (clb >> 32) as u32);
         mmio_write32(dev.port_reg(PORT_FB), (fb & 0xFFFF_FFFF) as u32);
         mmio_write32(dev.port_reg(PORT_FB) + 4, (fb >> 32) as u32);
-        // Clear SATA errors
         mmio_write32(dev.port_reg(PORT_SERR), 0xFFFFFFFF);
         dev.start_port();
 
-        // Find out the number of blocks with the IDENTIFY DEVICE
         let identify_buf = pfa::alloc_frame().ok_or("no identify frame")?;
         core::ptr::write_bytes(identify_buf as *mut u8, 0, 4096);
 
-        // Special command for IDENTIFY (0xEC), data reading
         mmio_write32(dev.port_reg(PORT_IS), 0xFFFFFFFF);
         let cmd_header = dev.clb as *mut CmdHeader;
         core::ptr::write_volatile(cmd_header, CmdHeader {
@@ -341,7 +309,6 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
             core::hint::spin_loop();
         }
 
-        // IDENTIFY result: number of blocks (LBA48) in word 100-103 (offset 200 bytes)
         let lba48 = core::ptr::read_volatile((identify_buf + 200) as *const u64);
         dev.block_count = lba48;
         pfa::free_frame(identify_buf);
@@ -352,7 +319,6 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
     Ok(())
 }
 
-// Get disk info
 pub fn info() -> Option<(u32, u64)> {
     unsafe {
         #[allow(static_mut_refs)]
@@ -360,19 +326,52 @@ pub fn info() -> Option<(u32, u64)> {
     }
 }
 
-// BlockDevice interface (same with NVMe) ===
 pub fn read_block(lba: u64, buf: &mut [u8]) -> Result<(), &'static str> {
     unsafe {
         #[allow(static_mut_refs)]
         let dev = AHCI.as_mut().ok_or("AHCI could not be started")?;
         let bs = dev.block_size as usize;
-        if buf.len() < bs { return Err("buffer is tiny"); }
 
-        let dma = pfa::alloc_frame().ok_or("no dma frame")?;
-        dev.run_command(lba, dma, 1, false)?;
-        core::ptr::copy(dma as *const u8, buf.as_mut_ptr(), bs);
-        pfa::free_frame(dma);
-        Ok(())
+        if buf.len() % bs != 0 { return Err("buffer not aligned to block size"); }
+        if buf.len() == 0 { return Ok(()); }
+
+        let count = (buf.len() / bs) as u16;              
+        let page_count = (buf.len() + 4095) / 4096;       
+        if page_count > 512 { return Err("transfer too large"); }
+
+        let mut pages = [0u64; 512];
+        for i in 0..page_count {
+            if let Some(frame) = pfa::alloc_frame() {
+                pages[i] = frame;
+            } else {
+                for j in 0..i {
+                    pfa::free_frame(pages[j]);
+                }
+                return Err("no dma frame");
+            }
+        }
+
+        let result = dev.run_command(lba, &pages[0..page_count], count, false);
+        if result.is_ok() {
+            let mut remaining = buf.len();
+            let mut offset = 0;
+            for i in 0..page_count {
+                let copy_len = core::cmp::min(remaining, 4096);
+                core::ptr::copy(
+                    pages[i] as *const u8,
+                    buf.as_mut_ptr().add(offset),
+                    copy_len,
+                );
+                offset += copy_len;
+                remaining -= copy_len;
+            }
+        }
+
+        for i in 0..page_count {
+            pfa::free_frame(pages[i]);
+        }
+
+        result
     }
 }
 
@@ -381,13 +380,45 @@ pub fn write_block(lba: u64, buf: &[u8]) -> Result<(), &'static str> {
         #[allow(static_mut_refs)]
         let dev = AHCI.as_mut().ok_or("AHCI could not be started")?;
         let bs = dev.block_size as usize;
-        if buf.len() < bs { return Err("buffer is tiny"); }
 
-        let dma = pfa::alloc_frame().ok_or("no dma frame")?;
-        core::ptr::copy(buf.as_ptr(), dma as *mut u8, bs);
-        dev.run_command(lba, dma, 1, true)?;
-        pfa::free_frame(dma);
-        Ok(())
+        if buf.len() % bs != 0 { return Err("buffer not aligned to block size"); }
+        if buf.len() == 0 { return Ok(()); }
+
+        let count = (buf.len() / bs) as u16;
+        let page_count = (buf.len() + 4095) / 4096;
+        if page_count > 512 { return Err("transfer too large"); }
+
+        let mut pages = [0u64; 512];
+        for i in 0..page_count {
+            if let Some(frame) = pfa::alloc_frame() {
+                pages[i] = frame;
+            } else {
+                for j in 0..i {
+                    pfa::free_frame(pages[j]);
+                }
+                return Err("no dma frame");
+            }
+        }
+
+        let mut remaining = buf.len();
+        let mut offset = 0;
+        for i in 0..page_count {
+            let copy_len = core::cmp::min(remaining, 4096);
+            core::ptr::copy(
+                buf.as_ptr().add(offset),
+                pages[i] as *mut u8,
+                copy_len,
+            );
+            offset += copy_len;
+            remaining -= copy_len;
+        }
+
+        let result = dev.run_command(lba, &pages[0..page_count], count, true);
+        for i in 0..page_count {
+            pfa::free_frame(pages[i]);
+        }
+
+        result
     }
 }
 
