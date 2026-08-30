@@ -6,12 +6,10 @@ pub unsafe fn enter_user_mode(entry: u64, user_stack_top: u64) -> ! {
     let user_ds = (sel.user_data.0 | 3) as u64;
 
     asm!(
-        // first set data segments
         "mov ds, {ds:x}",
         "mov es, {ds:x}",
         "mov fs, {ds:x}",
         "mov gs, {ds:x}",
-        // iretq frame: SS, RSP, RFLAGS, CS, RIP (inverse push)
         "push {ss}",
         "push {rsp}",
         "push 0x202",
