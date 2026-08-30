@@ -23,7 +23,7 @@ pub struct Task {
     pub stack: Vec<u8>,
 }
 
-const STACK_SIZE: usize = 64 * 1024; // 64 KB stack per task
+const STACK_SIZE: usize = 64 * 1024; 
 
 impl Task {
     // Create new task
@@ -33,9 +33,6 @@ impl Task {
         let stack_top = stack.as_mut_ptr() as u64 + STACK_SIZE as u64;
         let stack_top = stack_top & !0xF;
 
-        // Prepare the stack "as if it were already saved" 
-        // We place the registers that will be popped in the first switch 
-        // Order: It must be the REVERSE order of popping by context_switch.
         unsafe {
             let mut sp = stack_top as *mut u64;
 
@@ -62,7 +59,6 @@ impl Task {
 
 extern "C" fn task_exit() {
     loop {
-        // task bitti, baska task'a gecmeyi bekle
         unsafe { asm!("hlt"); }
     }
 }
@@ -90,14 +86,12 @@ impl Scheduler {
     }
 }
 
-// Start global scheduler
 pub fn init() {
     unsafe {
         SCHEDULER = Some(Scheduler::new());
     }
 }
 
-// Add task
 pub fn spawn(entry: fn()) {
     unsafe {
         if let Some(sched) = SCHEDULER.as_mut() {
@@ -138,26 +132,17 @@ pub fn schedule() {
     }
 }
 
-// Context Switch (assembly)
-// prev: context of the current task (RSP is saved here)
-// next: context of the next task (RSP is loaded from here)
 #[unsafe(naked)]
 unsafe extern "C" fn context_switch(_prev: *mut Context, _next: *const Context) {
     core::arch::naked_asm!(
-        // save Callee-saved registers (to current task's stack)
         "push rbp",
         "push rbx",
         "push r12",
         "push r13",
         "push r14",
         "push r15",
-
-        // Save current RSP to prev->rsp (rdi = prev)
         "mov [rdi], rsp",
-
-        // Load new RSP to next->rsp (rsi = next)
         "mov rsp, [rsi]",
-
         "pop r15",
         "pop r14",
         "pop r13",
@@ -169,7 +154,6 @@ unsafe extern "C" fn context_switch(_prev: *mut Context, _next: *const Context) 
     );
 }
 
-// Jump first task
 pub fn start() {
     unsafe {
         let sched = match SCHEDULER.as_mut() {
