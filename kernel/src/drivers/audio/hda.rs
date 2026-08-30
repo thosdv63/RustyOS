@@ -1,5 +1,3 @@
-// Codec commands are sent via Immediate Command Interface (ICI) -> DMA is not required. 
-// BDL DMA is used only for audio data.
 use alloc::vec::Vec;
 use alloc::format;
 use crate::drivers::pci::PciDevice;
@@ -16,12 +14,12 @@ const STATESTS: u64 = 0x0E; // u16
 const INTCTL:   u64 = 0x20; // u32
 
 // Immediate Command Interface
-const ICW: u64 = 0x60; // u32  Immediate Command Output
-const IRR: u64 = 0x64; // u32  Immediate Response Input
-const ICS: u64 = 0x68; // u16  Immediate Command Status
+const ICW: u64 = 0x60; 
+const IRR: u64 = 0x64;
+const ICS: u64 = 0x68;
 
-const ICS_BUSY:  u16 = 0x0001; // ICB
-const ICS_VALID: u16 = 0x0002; // IRV
+const ICS_BUSY:  u16 = 0x0001;
+const ICS_VALID: u16 = 0x0002;
 
 // Stream descriptor (to sd base)
 const SD_CTL:  u64 = 0x00; // 3 byte
@@ -385,10 +383,12 @@ pub fn init(devices: &Vec<PciDevice>) -> Option<Hda> {
 
             dbg(&format!("[HDA] mmio=0x{:X} bdl=0x{:X}\n", mmio, bdl_addr()));
 
+            let mut ptm = crate::mm::vmm::PageTableManager::active();
             for i in 0..8u64 {
                 let a = mmio + i * 0x1000;
-                if crate::mm::ptm::translate(a).is_none() {
-                    let _ = crate::mm::ptm::map_page(a, a, true);
+                if ptm.translate(a).is_none() {
+                    // MMIO map'i: (virt, phys, size, writable, user, disable_cache, execute)
+                    ptm.map(a, a, 4096, true, false, true, false);
                 }
             }
 
