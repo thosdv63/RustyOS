@@ -29,7 +29,6 @@ static mut BOOT_STACK: BootStack = BootStack([0; BOOT_STACK_SIZE]);
 use kernRenderer::Renderer;
 
 static mut RENDERER: Option<Renderer> = None;
-pub static WIN7_STARTUP_SOUND: &[u8] = include_bytes!("win7.raw");
 static BOOT_ANIM_ACTIVE: AtomicBool = AtomicBool::new(false);
 static BOOT_ANIM_TICK: AtomicU64 = AtomicU64::new(0);
 const ANIM_TICK_BOL: u64 = 80;
