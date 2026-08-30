@@ -21,9 +21,15 @@ mod mm;
 mod drivers;
 mod fs;
 
+const BOOT_STACK_SIZE: usize = 128 * 1024;
+#[repr(align(16))]
+struct BootStack([u8; BOOT_STACK_SIZE]);
+static mut BOOT_STACK: BootStack = BootStack([0; BOOT_STACK_SIZE]);
+
 use kernRenderer::Renderer;
 
 static mut RENDERER: Option<Renderer> = None;
+pub static WIN7_STARTUP_SOUND: &[u8] = include_bytes!("win7.raw");
 static BOOT_ANIM_ACTIVE: AtomicBool = AtomicBool::new(false);
 static BOOT_ANIM_TICK: AtomicU64 = AtomicU64::new(0);
 const ANIM_TICK_BOL: u64 = 80;
@@ -51,7 +57,7 @@ pub fn sysinfo_fill(p: *mut u32) {
         let t = SYS_TICKS.load(Ordering::Relaxed);
         let po = POLL_COUNT.load(Ordering::Relaxed);
         let dt = t.saturating_sub(LT);
-        if dt >= 20 {
+        if dt >= 20 { // ~her guncelleme penceresi
             let dp = po.saturating_sub(LP);
             let rate = dp * 100 / dt;
             if rate > MAXR { MAXR = rate; }
@@ -71,6 +77,7 @@ pub unsafe fn renderer() -> &'static mut Renderer {
 }
 
 pub fn boot_anim_irq_tick() {
+    // ses durdurma irq si
     SYS_TICKS.fetch_add(1, Ordering::Relaxed);
     drivers::audio::tick();
 
@@ -216,7 +223,7 @@ fn play_boot_animation(renderer: &mut Renderer, w: usize, h: usize) {
     for _ in 0..160 {
         update_boot_anim();
         renderer.set_color(0x00FF8020);
-        renderer.text_at(w / 2 - 165, h - 40, "Rusty Starting...");
+        renderer.text_at(w / 2 - 165, h - 40, "Rusty Baslatiliyor...");
         boot_delay_ms(10);
     }
     boot_delay_ms(30);
@@ -243,7 +250,7 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     renderer.set_color(0x00FFFFFF);
 
     renderer.set_color(0x00FF8020);
-    renderer.text_at(fb.width as usize / 2 - 165, fb.height as usize - 40, "Rusty Starting...");
+    renderer.text_at(fb.width as usize / 2 - 165, fb.height as usize - 40, "Rusty Baslatiliyor...");
 
     let rpe_mode = unsafe { (*boot_info).rpe_mode } != 0;
     kernel::rpe::set_mode(rpe_mode);
@@ -271,8 +278,9 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
         unsafe { kernel::schd::apic::disable_pic(); }
 
         let lapic_phys = info.local_apic_addr as u64;
-        if mm::ptm::translate(lapic_phys).is_none() {
-            let _ = mm::ptm::map_page(lapic_phys, lapic_phys, true);
+        let mut ptm = crate::mm::vmm::PageTableManager::active();
+        if ptm.translate(lapic_phys).is_none() {
+            ptm.map(lapic_phys, lapic_phys, 4096, true, false, true, false); 
         }
         let lapic = kernel::schd::lapic::Lapic::new(lapic_phys as usize);
         unsafe {
@@ -282,8 +290,8 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
         }
 
         let ioapic_phys = info.io_apic_addr as u64;
-        if mm::ptm::translate(ioapic_phys).is_none() {
-            let _ = mm::ptm::map_page(ioapic_phys, ioapic_phys, true);
+        if ptm.translate(ioapic_phys).is_none() {
+            ptm.map(ioapic_phys, ioapic_phys, 4096, true, false, true, false);
         }
         let ioapic = kernel::schd::apic::IoApic::new(ioapic_phys as usize);
         unsafe {
@@ -295,10 +303,10 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 
         let devices = drivers::pci::scan(info.pci_config_addr);
 
-        // Fallback soundscape
+        let mut ptm = crate::mm::vmm::PageTableManager::active();
         for i in 0..256u64 {
             let addr = 0x0100_0000 + i * 0x1000;
-            let _ = mm::ptm::map_page(addr, addr, true);
+            ptm.map(addr, addr, 4096, true, false, false, false);
         }
 
         drivers::audio::init(&devices);
@@ -306,6 +314,7 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
 
         let _ = drivers::storage::nvme::init(&devices);
         let _ = drivers::storage::ahci::init(&devices);
+        let _ = drivers::storage::ide::init(&devices);
         let _ = drivers::usb::xhci::init(&devices);
         drivers::usb::storage::init_all();
         kernel::rpe::loading_progress(60); 
@@ -372,13 +381,13 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
                 kernel::rgst::CACHE_DESKTOP.store(renk, core::sync::atomic::Ordering::Relaxed);
             }
         }
-        kernel::rpe::loading_progress(80); 
+        kernel::rpe::loading_progress(80);   // YENI
 
         if !kernel::rpe::is_rpe() {
             kernel::rgst::recovery::set_embedded_core(EMBEDDED_USERLAND);
             let missing = kernel::rgst::recovery::check();
             if !missing.is_empty() {
-                kernel::rgst::recovery::run(&missing);
+                kernel::rgst::recovery::run(&missing); // geri donmez -> reboot
             }
         }
     }
@@ -402,7 +411,6 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     let fb_pages = (fb_size + 0xFFF) / 0x1000;
     for i in 0..fb_pages {
         let addr = fb_base + i * 0x1000;
-        let _ = mm::ptm::remap_user(addr);
     }
 
     let fb_base = fb.base as u64;
@@ -410,39 +418,45 @@ pub extern "C" fn _start(boot_info: *const BootInfo) -> ! {
     let fb_pages = (fb_bytes + 0xFFF) / 0x1000;
     for i in 0..fb_pages {
         let addr = fb_base + i * 0x1000;
-        let _ = mm::ptm::map_page_user(addr, addr, true);
+    }
+    let mut ptm = crate::mm::vmm::PageTableManager::active();
+    for i in 0..fb_pages {
+        let addr = fb_base + i * 4096;
+        // user = true, disable_cache = true
+        ptm.map(addr, addr, 4096, true, true, true, false);
     }
 
     let back_buffer: u64 = 0x_1000_0000;
-    for i in 0..fb_pages {
-        let addr = back_buffer + i * 0x1000;
-        let _ = mm::ptm::map_range_user(addr, 1, true);
-    }
+    let _ = crate::mm::vmm::map_range_ex(back_buffer, fb_pages, true, true, false);
     unsafe { crate::BACK_BUFFER_ADDR = back_buffer; }
     let bb_mb = ((fb.stride * fb.height * 4) / (1024 * 1024) + 1) as u32;
-    USED_RAM_MB.store(20 + bb_mb, Ordering::Relaxed); 
+    USED_RAM_MB.store(20 + bb_mb, Ordering::Relaxed); // kernel+pcm+heap+userheap tahmini + backbuffer
     renderer.clear(0x00000000);
 
     let user_code: u64 = 0x400000;
-    let _ = mm::ptm::map_range_user(user_code, 16, true);
-
     let user_stack: u64 = 0x300000;
-    let _ = mm::ptm::map_range_user(user_stack, 16, true);
+
+    let mut ptm = crate::mm::vmm::PageTableManager::active();
+    ptm.unmap(0x200000, 2 * 1024 * 1024);
+    ptm.unmap(0x400000, 2 * 1024 * 1024);
+
+    let _ = crate::mm::vmm::map_range_ex(user_stack, 16, true, true, false);
     let user_stack_top = user_stack + 16 * 0x1000;
 
     let user_heap: u64 = 0x_5000_0000_0000;
-    for i in 0..1024u64 {
-        let _ = mm::ptm::map_range_user(user_heap + i * 0x1000, 1, true);
-    }
+    let _ = crate::mm::vmm::map_range_ex(user_heap, 1024, true, true, false);
 
     let core_bin = match kernel::rgst::fsops::read_system_file("CORE.BIN") {
         Some(d) => d,
         None => {
             renderer.set_color(0x00FF3030);
-            renderer.text("\n\n   CRITICAL ERROR: RSYS/CORE.BIN DOESNT EXIST!\n   System files missing or deleted.\n   Rusty Starting.\n");
+            renderer.text("\n\n   KRITIK HATA: RSYS/CORE.BIN BULUNAMADI!\n   Sistem dosyalari eksik veya silinmis.\n   Rusty baslatilamiyor.\n");
             loop { unsafe { core::arch::asm!("hlt"); } }
         }
     };
+
+    let user_pages = ((core_bin.len() as u64) + 0xFFF) / 0x1000;
+    let _ = crate::mm::vmm::map_range_ex(user_code, user_pages.max(16), true, true, true);
 
     unsafe {
         core::ptr::copy_nonoverlapping(
