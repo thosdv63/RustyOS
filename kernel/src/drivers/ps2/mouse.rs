@@ -36,10 +36,8 @@ static mut OLD_X: i32 = 400;
 static mut OLD_Y: i32 = 300;
 static mut FIRST_DRAW: bool = true;
 
-// The buffer that stores the original pixels under the mouse cursor.
 static mut BACK_BUFFER: [u32; CURSOR_WIDTH * CURSOR_HEIGHT] = [0; CURSOR_WIDTH * CURSOR_HEIGHT];
 
-// PS/2 status checks
 unsafe fn mouse_wait(type_bit: u8) {
     let mut timeout = 100_000;
     let mut port = Port::<u8>::new(0x64);
@@ -70,49 +68,42 @@ unsafe fn mouse_read() -> u8 {
     Port::<u8>::new(0x60).read()
 }
 
-// Starting mouse cursor (hardware)
 pub unsafe fn init() {
     let mut cmd_port = Port::<u8>::new(0x64);
     let mut data_port = Port::<u8>::new(0x60);
 
-    // Activate the assistive device (mouse)
     mouse_wait(1);
     cmd_port.write(0xA8);
 
-    // Read the controller instruction byte and activate IRQ 12
     mouse_wait(1);
     cmd_port.write(0x20);
     mouse_wait(0);
     let mut status = data_port.read();
-    status |= 2; // Bit 1: Mouse IRQ 12 enable
-    status &= !0x20; // Bit 5: Remove mouse clock disable
+    status |= 2; 
+    status &= !0x20; 
     
     mouse_wait(1);
     cmd_port.write(0x60);
     mouse_wait(1);
     data_port.write(status);
 
-    // Load default settings for the mouse and enable data streaming
-    mouse_write(0xF6); // Set Default
-    let _ = mouse_read(); // skip ACK (0xFA)
+    mouse_write(0xF6);
+    let _ = mouse_read(); 
 
-    mouse_write(0xF4); // Enable Data Reporting
-    let _ = mouse_read(); // skip ACK (0xFA)
+    mouse_write(0xF4); 
+    let _ = mouse_read();
 }
 
-// Background recovery and mouse redraw engine
 unsafe fn render_mouse() {
     let renderer = crate::renderer();
     let fb_width = renderer.width as i32;
     let fb_height = renderer.height as i32;
 
-    // Border controls (Do not extend beyond the screen)
     if MOUSE_X < 0 { MOUSE_X = 0; }
     if MOUSE_Y < 0 { MOUSE_Y = 0; }
     if MOUSE_X > fb_width - CURSOR_WIDTH as i32 { MOUSE_X = fb_width - CURSOR_WIDTH as i32; }
     if MOUSE_Y > fb_height - CURSOR_HEIGHT as i32 { MOUSE_Y = fb_height - CURSOR_HEIGHT as i32; }
 
-    // If it's not the first drawing, restore the background from the old location (Delete operation)
     if !FIRST_DRAW {
         for cy in 0..CURSOR_HEIGHT {
             for cx in 0..CURSOR_WIDTH {
@@ -128,18 +119,15 @@ unsafe fn render_mouse() {
         FIRST_DRAW = false;
     }
 
-    // Back up the background of the new location (Backup process)
     for cy in 0..CURSOR_HEIGHT {
         for cx in 0..CURSOR_WIDTH {
             let nx = MOUSE_X + cx as i32;
             let ny = MOUSE_Y + cy as i32;
-            // We're directly extracting the current color of that pixel from the renderer
             let current_pixel = renderer.get_pixel(nx as usize, ny as usize);
             BACK_BUFFER[cy * CURSOR_WIDTH + cx] = current_pixel;
         }
     }
 
-    // Draw the mouse cursor to the new location (Drawing process)
     for cy in 0..CURSOR_HEIGHT {
         for cx in 0..CURSOR_WIDTH {
             let nx = MOUSE_X + cx as i32;
@@ -154,7 +142,6 @@ unsafe fn render_mouse() {
         }
     }
 
-    // Update old cordinates
     OLD_X = MOUSE_X;
     OLD_Y = MOUSE_Y;
 }
@@ -162,14 +149,12 @@ unsafe fn render_mouse() {
 static mut MOUSE_CYCLE: u8 = 0;
 static mut MOUSE_PACKET: [u8; 3] = [0; 3];
 
-// Data parser (State Machine) to be called when an interrupt occurs
 pub unsafe fn handle_interrupt() {
     let mut data_port = Port::<u8>::new(0x60);
     let byte = data_port.read();
 
     match MOUSE_CYCLE {
         0 => {
-            // The third bit of the first byte must always be 1 (Synchronization check)
             if (byte & 0x08) == 0x08 {
                 MOUSE_PACKET[0] = byte;
                 MOUSE_CYCLE = 1;
@@ -187,7 +172,6 @@ pub unsafe fn handle_interrupt() {
             let mut x_move = MOUSE_PACKET[1] as i32;
             let mut y_move = MOUSE_PACKET[2] as i32;
 
-            // CLICK DETECTION AND COLOR CHANGE
             if (flags & 0x01) == 0x01 {
                 MOUSE_COLOR = 0x0000FF00; // Left Click: Green
             } else if (flags & 0x02) == 0x02 {
@@ -204,13 +188,11 @@ pub unsafe fn handle_interrupt() {
             MOUSE_X += x_move;
             MOUSE_Y -= y_move;
 
-            // Border control
             if MOUSE_X < 0 { MOUSE_X = 0; }
             if MOUSE_Y < 0 { MOUSE_Y = 0; }
             if MOUSE_X > 1280 - 1 { MOUSE_X = 1280 - 1; }
             if MOUSE_Y > 800 - 1 { MOUSE_Y = 800 - 1; }
 
-            // Buton bits
             let buttons = (flags & 0x07) as i32; // bit0=left, bit1=right, bit2=middle
 
             // push to event queue
