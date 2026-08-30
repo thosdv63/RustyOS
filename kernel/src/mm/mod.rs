@@ -1,13 +1,14 @@
 pub mod pfa;
-pub mod ptm;   
+pub mod vmm;   
 pub mod heap;  
 
 use common::bootinfo::BootInfo;
 
-// Tum bellek yonetimini baslat
 pub fn init(boot_info: *const BootInfo) {
-    pfa::init(boot_info);
-    ptm::init();
+    unsafe {
+        let info = &*boot_info;
+        pfa::init(info.memory_regions, info.memory_region_count as usize);
+    }
+    vmm::init();
     heap::init();
 }
-
