@@ -1,15 +1,3 @@
-// ============================================================
-// ADD FILES TO ESP - DOES NOT FORMAT! //
-// Leaves the existing EFI System Partition AS IS.
-// Reads its BPB, scans the FAT and ONLY writes to EMPTY clusters.
-// Does NOT touch the Windows Boot Manager, GRUB, or any existing files. //
-// What they wrote:
-// \EFI\Rusty\BOOTX64.EFI -> always (permanent home)
-// \EFI\BOOT\BOOTX64.EFI -> ONLY if empty (F12 fallback)
-// DO NOT TOUCH IF FULL (May be a Windows copy)
-//
-// Security: Gives the calling PartitionDevice -> Cannot be written to outside of ESP. 
-// ==============================================================
 use alloc::vec::Vec;
 use crate::fs::BlockDevice;
 
@@ -311,23 +299,15 @@ impl<'a> Esp<'a> {
     }
 }
 
-// ============================================================
-// ENTRY POINT: Add bootloader to ESP (DOES NOT FORMAT)
-// dev = ESP's PartitionDevice
-// Returns: true = \EFI\BOOT also written to fallback (visible on F12)
-// false = fallback WAS FULL, not touched (efibootmgr required)
-// ==============================================================
 pub fn install_bootloader(dev: &mut dyn BlockDevice, boot: &[u8]) -> Result<bool, &'static str> {
     if boot.is_empty() { return Err("ESP: bootloader bos"); }
     let mut e = Esp::open(dev)?;
     let root = e.root_cluster;
 
-    // 1) \EFI\Rusty\BOOTX64.EFI  -> always
     let efi = e.ensure_dir(root, &sn("EFI"))?;
     let rusty = e.ensure_dir(efi, &sn("RUSTY"))?;
     e.write_file(rusty, &sn3("BOOTX64", "EFI"), boot)?;
 
-    // 2) \EFI\BOOT\BOOTX64.EFI -> only if is empty
     let mut fallback = false;
     let boot_dir = e.find(efi, &sn("BOOT"))?;
     match boot_dir {
