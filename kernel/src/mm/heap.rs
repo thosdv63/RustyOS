@@ -1,20 +1,16 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::null_mut;
-use crate::mm::ptm;
+use crate::mm::vmm;
+use crate::mm::pfa::PAGE_SIZE;
 
-// Heap settings
-// Where to place the heap in the virtual address space (an empty, high area)
 pub const HEAP_START: u64 = 0x_4444_0000_0000;
-pub const HEAP_SIZE: usize = 1024 * 1024; // 1 MB heap (256 page)
+pub const HEAP_SIZE: usize = 1024 * 1024; // 1 MB heap
 
-// Empty block node (linked list)
-// Each empty block holds the information "my size + next empty block" within itself.
 struct FreeBlock {
     size: usize,
     next: Option<&'static mut FreeBlock>,
 }
 
-// Allocator structure
 pub struct LockedHeap {
     head: spin::Mutex<HeapInner>,
 }
@@ -35,13 +31,11 @@ impl LockedHeap {
     }
 }
 
-// Alignment assistant: round the addr up to the align level
 fn align_up(addr: usize, align: usize) -> usize {
     (addr + align - 1) & !(align - 1)
 }
 
 impl HeapInner {
-    // Add the heap region as the first empty block
     unsafe fn init(&mut self, start: usize, size: usize) {
         self.add_free_region(start, size);
         self.initialized = true;
@@ -70,7 +64,6 @@ impl HeapInner {
             let block_end = block_addr + block.size;
 
             if alloc_end <= block_end {
-                // this blocks is good
                 let next = block.next.take();
                 if let Some(p) = prev {
                     p.next = next;
@@ -79,7 +72,6 @@ impl HeapInner {
                 }
                 return Some((alloc_start, block.size));
             } else {
-                // not good, go next
                 let next = block.next.take();
                 block.next = None;
                 let block_ref: &'static mut FreeBlock = &mut *(block as *mut FreeBlock);
@@ -101,11 +93,9 @@ unsafe impl GlobalAlloc for LockedHeap {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let mut heap = self.head.lock();
 
-        // Start heap
         if !heap.initialized {
-            // Map heap area
-            let pages = (HEAP_SIZE as u64 + 0xfff) / 0x1000;
-            if ptm::map_range(HEAP_START, pages, true).is_err() {
+            let pages = (HEAP_SIZE as u64 + PAGE_SIZE - 1) / PAGE_SIZE;
+            if vmm::map_range(HEAP_START, pages, true).is_err() {
                 return null_mut();
             }
             heap.init(HEAP_START as usize, HEAP_SIZE);
@@ -133,21 +123,16 @@ unsafe impl GlobalAlloc for LockedHeap {
         let size = layout.size().max(core::mem::size_of::<FreeBlock>());
         let align = layout.align().max(core::mem::align_of::<FreeBlock>());
         let size = align_up(size, align);
-        // add empty list
+        
         heap.add_free_region(ptr as usize, size);
     }
 }
 
-// Global allocator
 #[global_allocator]
 pub static ALLOCATOR: LockedHeap = LockedHeap::new();
 
-pub fn init() {
-    // it will init automaticly
-}
+pub fn init() {} // automatic
 
-// It is called when the heap is full
-#[alloc_error_handler]
 fn alloc_error(layout: Layout) -> ! {
     unsafe {
         let r = crate::renderer();
