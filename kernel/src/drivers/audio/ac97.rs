@@ -13,7 +13,6 @@ const RESET:       u16 = 0x00;
 const MASTER_VOL:  u16 = 0x02;
 const PCM_OUT_VOL: u16 = 0x18;
 
-// 32 descriptor x 8 byte (addr:u32, samples:u16, ctrl:u16)
 static mut BDL: Aligned<256> = Aligned([0; 256]);
 
 fn bdl_addr() -> u32 { unsafe { #[allow(static_mut_refs)] BDL.0.as_ptr() as u32 } }
