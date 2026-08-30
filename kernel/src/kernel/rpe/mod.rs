@@ -1,8 +1,3 @@
-// ===========================================================
-// RPE: Rusty Preinstallation Environment
-// Payload embedded in kernel -> USB storage (xHCI) not required. // Flow: loading bar -> boot animation -> welcome ->
-// PARTITION SELECTION (GPT) -> confirm -> installation -> reboot.
-// ==============================================================
 pub mod ui;
 pub mod install;
 pub mod gpt;
@@ -75,12 +70,12 @@ pub fn run() -> ! {
         loop {
             let sel = match partition_select(&rows) {
                 Some(i) => i,
-                None => break,                  // ESC -> hosgeldin
+                None => break,               
             };
             let row = &rows[sel];
 
             ui::confirm_part(row);
-            if !wait_confirm() { continue; }    // ESC -> bolum listesi
+            if !wait_confirm() { continue; }   
 
             ui::install_begin();
             let mut cb = |s: usize, p: u32| ui::install_screen(s, p);
