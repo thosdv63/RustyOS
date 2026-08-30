@@ -1,69 +1,30 @@
 # 03 — Bellek
 
-Çekirdek kontrolü ele aldığında, bellek çalışmadan neredeyse başka hiçbir şey
-olamaz. Her ayırma, her sürücü tamponu, ekrandaki her pencere nihayetinde bellek
-alt sisteminden gelir ve Rusty OS bunu üç katmanda inşa eder: gerçek RAM'in 4 KB'lik
-sayfalarını dağıtan bir fiziksel çerçeve ayırıcısı, sanal adresleri bu çerçevelere
-eşleyen bir sayfa tablosu yöneticisi ve eşlenmiş bir bölgeden küçük nesneler yontan
-bir heap ayırıcısı.
+Çekirdek kontrolü ele aldığında, bellek çalışmadan neredeyse başka hiçbir şey olamaz. Her ayırma, her sürücü tamponu, ekrandaki her pencere nihayetinde bellek alt sisteminden gelir ve Rusty OS bunu üç katmanda inşa eder: RAM'i Buddy Allocator algoritmasıyla yöneten fiziksel çerçeve ayırıcısı, 4 seviyeli sayfa tablolarını ve dev sayfaları yönlendiren sanal bellek yöneticisi (VMM) ve eşlenmiş sanal bölgeden dinamik nesneler yontan heap ayırıcısı.
 
 ## Fiziksel çerçeve ayırıcısı
 
-En alt katman, `mm/pfa`'da, fiziksel belleği bir bitmap ile izler — her 4 KB'lik
-çerçeve için bir bit; çerçeve kullanımdayken set, boşken temiz. Başlangıçta
-önyükleyicinin ilettiği bellek haritasını okur, en yüksek kullanılabilir adresi
-bulur ve bitmap'i dört gigabaytlık bir tavana kadar tüm RAM'i kapsayacak şekilde
-boyutlandırır. Bitmap'in kendisi bir yerde bulunmak zorundadır, bu yüzden ayırıcı
-onu bulabildiği en büyük kullanılabilir bölgeye yerleştirir, ardından her şeyi
-kullanımda olarak işaretler ve yalnızca firmware'in sıradan bellek olarak
-bildirdiği bölgeleri serbest bırakır.
+En alt katman, `mm/pfa`'da, fiziksel belleği **Buddy Allocator** algoritmasıyla yönetir. Bitmap yaklaşımı yerine bellek, 0 ile 20 arasındaki seviyelere (`MAX_ORDER = 20`) bölünmüş blok listeleriyle izlenir — Order 0 tek bir 4 KB'lik sayfaya karşılık gelirken, Order 9 (2 MB) ve Order 18 (1 GB) gibi daha büyük bloklar tek seferde ayrılabilir. Başlangıçta önyükleyicinin `BootInfo` üzerinden ilettiği bellek haritasını tarar, kullanılabilir (`usable == 1`) bölgeleri hizalayarak uygun seviyedeki serbest listelere (`free_lists`) ekler.
 
-Bu ayırıcıyı ilginç kılan, neyi dağıtmayı reddettiğidir. Birkaç bölge elle rezerve
-edilmiştir. İlk beş megabayt — userland ikilisinin ve yığınının bulunduğu yer —
-kalıcı olarak kullanımda işaretlenir ve ayırıcının normal dağıtım rutini tamamen
-onların üzerinden başlar. Ayrıca ses için ayrılmış bir megabaytlık bir yedek bölge
-vardır. Sebep incedir ama önemlidir: DMA yeteneği olan donanım doğrudan fiziksel
-belleğe yazar ve bir disk ya da ses aktarımına çalışan userland'ın belleğindeki bir
-çerçeve verilseydi, canlı bir programı sessizce bozardı. Bu bölgeleri ayırıcının
-erişiminden çıkararak, ayıklanması imkânsız bir çökme kategorisi tasarım yoluyla
-ortadan kaldırılır.
+Donanım uyumluluğu ve sistem kararlılığı için ilk 1 MB'lık fiziksel bellek bölgesi (`0x100000` öncesi) tamamen ayırıcının dışında tutulur. Fiziksel bellekteki serbest blok yapılarının yönetimi ise **HHDM (Higher Half Direct Map)** tekniğiyle sağlanır; `0xFFFF_8000_0000_0000` offset'i kullanılarak fiziksel adresler sanal adres alanına dönüştürülür ve serbest blok düğümleri (`FreeBlock`) bellek üzerinde doğrudan manipüle edilir.
 
 ## Sayfa tablosu yöneticisi
 
-Çerçeve ayırıcısının üzerinde `mm/ptm`, sanal bellekle ilgilenir. Rusty OS,
-firmware'in kurduğu birebir eşlemeye (identity mapping) dayanır — sanal adresler
-fiziksel adreslere eşittir — ve gerektiğinde onu genişletir. Yönetici, tek bir
-sayfayı bir çerçeveye eşleyebilir, eşlemeyi kaldırabilir ya da bir bütün aralığı
-tek seferde eşleyerek her sayfa için ayırıcıdan taze çerçeveler çekebilir. Ayrıca
-sayfaları kullanıcı erişimine açık olarak işaretlemeyi de bilir; bu, çekirdeğin
-belleği ring-3 userland'a açması gerektiğinde önem kazanır.
+Çerçeve ayırıcısının üzerinde `mm/vmm`, 4 seviyeli (PML4, PDPT, PD, PT) x86_64 sanal bellek mimarisini yönetir. Sanal adresleri fiziksel çerçevelere eşleme (`map`), eşleme kaldırma (`unmap`) ve adres çevirisi (`translate`) işlemlerini yürütür. Yapı; standart 4 KB sayfaların yanı sıra yüksek performans gerektiren durumlar için 2 MB ve 1 GB'lık **Dev Sayfaları (Huge Pages)** destekler.
 
-Burada tekrar eden bir ayrıntı, işlemcinin yazma koruması (write-protect) bitiyle
-yapılan küçük bir danstır. Çekirdek yazma koruması etkin hâlde çalışır; bu normalde
-ring-0 kodunun bile salt okunur eşlemeler üzerinden yazmasını engeller. Sayfa
-tablolarını güvenle düzenlemek için yönetici bu biti kısaca temizler, eşlemeyi
-yapar ve geri yükler — her değişikliği parantez içine alarak korumanın yalnızca bir
-an için kapalı kalmasını sağlar.
+Sanal bellek yöneticisi, alt sayfa tablolarına doğrudan HHDM offset'i üzerinden erişir. Güvenlik tarafında, **NXE (No-Execute Enable)** özelliği aktifleştirilerek `PTE_NO_EXECUTE` biti ile veri bölgelerinde kod çalıştırılması engellenir. Ayrıca `PTE_USER` (Ring-3 erişimi), `PTE_WRITABLE` ve önbellek kapatma (`PTE_NO_CACHE`, `PTE_WRITE_THROUGH`) bayrakları ile bellek erişimleri hassas bir şekilde denetlenir. Her tablo değişikliğinde TLB `invlpg` talimatı ile güncellenir.
 
 ## Heap
 
-En üst katman, `mm/heap`'te, Rust'ın `alloc` tiplerinin dayandığı küçük ve sık
-ayırmaları karşılayan bir bağlı liste ayırıcısıdır — çekirdekteki her `Vec`,
-`String` ve `Box`. İlk kullanımında sabit yüksek bir adreste bir megabaytlık bir
-bölge eşler ve serbest listesini o tek blokla tohumlar. O andan itibaren ayırma,
-listede yeterince büyük bir blok arar, ihtiyaç duyduğunu ayırır ve geri kalanı
-havuza döndürür; serbest bırakma ise bölgeyi listeye geri iter.
+En üst katman, `mm/heap`'te, Rust'ın `alloc` tiplerine (`Vec`, `String`, `Box`) hizmet eden ve `spin::Mutex` ile senkronize edilen `LockedHeap` ayırıcısıdır. Rust'ın `GlobalAlloc` arayüzünü uygular.
 
-Çekirdek ve userland'ın her biri kendi sabit adresinde kendi heap'ine sahiptir —
-çekirdeğinki kendi adres alanında yüksekte, userland'ınki daha da yüksekte. Hiçbir
-durumu paylaşmazlar; bu da ayrıcalıklı ve ayrıcalıksız kod arasındaki sınırı temiz
-tutar: userland, çekirdeğin onun için eşlediği bellekten ayırma yapar ve çekirdeğin
-kendi havuzuna asla dokunmaz.
+Tembel yükleme (lazy initialization) mantığıyla çalışan heap, ilk ayırma isteği geldiğinde `0x4444_0000_0000` (`HEAP_START`) sanal adresinde 1 MB'lık (`HEAP_SIZE`) bir bölgeyi `vmm::map_range` ile fiziksel çerçevelere bağlar. İç mimaride bağlı liste (`FreeBlock`) yapısını kullanır; gelen bellek isteklerini boyut ve hizalama (`align_up`) gereksinimlerine göre en uygun serbest bloktan ayırır, artık kalan parçaları tekrar havuza serbest blok olarak ekler.
 
 ```
-   heap (Vec, String, Box)          ← küçük nesneler
-        │ içine eşlenir
-   sayfa tablosu yöneticisi (sanal → fiziksel)
-        │ çerçeveler buradan
-   çerçeve ayırıcısı (RAM'in 4 KB sayfalarının bitmap'i)
+   heap (Vec, String, Box)           ← LockedHeap (0x4444_0000_0000 / 1 MB)
+       │ VMM map_range ile eşlenir
+   sanal bellek yöneticisi (VMM)     ← 4 Seviyeli Tablo (4KB / 2MB / 1GB, NXE, HHDM)
+       │ çerçeveler buradan çekilir
+   çerçeve ayırıcısı (Buddy Alloc)   ← Order 0-20 (4KB - 4GB), HHDM tabanlı
+
 ```
