@@ -124,7 +124,7 @@ pub struct Ring {
 
 impl Ring {
     fn new() -> Option<Ring> {
-        let base = pfa::alloc_frame()?;
+        let base = pfa::alloc_page()?;
         let mut r = Ring { base, enq: 0, cycle: true };
         r.reset();
         Some(r)
@@ -465,10 +465,11 @@ fn init_inner(devices: &[PciDevice]) -> Result<(), &'static str> {
     let bar = pci::read_bar(pd.bus, pd.device, pd.function, 0);
     if bar == 0 { return Err("xHCI BAR0 is zero"); }
 
+    let mut vmm = crate::mm::vmm::PageTableManager::active();
     for i in 0..16u64 {
         let a = bar + i * 0x1000;
-        if crate::mm::ptm::translate(a).is_none() {
-            crate::mm::ptm::map_page(a, a, true)?;
+        if vmm.translate(a).is_none() {
+            vmm.map(a, a, 4096, true, false, true, false);
         }
     }
 
@@ -518,15 +519,15 @@ fn init_inner(devices: &[PciDevice]) -> Result<(), &'static str> {
             core::hint::spin_loop();
         }
 
-        let dcbaa = pfa::alloc_frame().ok_or("dcbaa frame yok")?;
-        zero_frame(dcbaa);
+        let dcbaa = crate::mm::pfa::alloc_page().ok_or("dcbaa page yok")?;
+        core::ptr::write_bytes(dcbaa as *mut u8, 0, 4096);
 
         if scratchpads > 0 {
-            let arr = pfa::alloc_frame().ok_or("scratchpad array doesn't exist")?;
-            zero_frame(arr);
+            let arr = crate::mm::pfa::alloc_page().ok_or("scratchpad array doesn't exist")?;
+            core::ptr::write_bytes(arr as *mut u8, 0, 4096);
             for i in 0..scratchpads.min(512) {
-                let sp = pfa::alloc_frame().ok_or("scratchpad frame doesn't exist")?;
-                zero_frame(sp);
+                let sp = crate::mm::pfa::alloc_page().ok_or("scratchpad frame doesn't exist")?;
+                core::ptr::write_bytes(sp as *mut u8, 0, 4096);
                 core::ptr::write_volatile((arr + (i * 8) as u64) as *mut u64, sp);
             }
             core::ptr::write_volatile(dcbaa as *mut u64, arr);
@@ -534,10 +535,11 @@ fn init_inner(devices: &[PciDevice]) -> Result<(), &'static str> {
 
         let cmd_ring = Ring::new().ok_or("cmd ring frame doesn't exist")?;
 
-        let evt_seg = pfa::alloc_frame().ok_or("event seg frame doesn't exist")?;
-        zero_frame(evt_seg);
-        let erst = pfa::alloc_frame().ok_or("erst frame doesn't exist")?;
-        zero_frame(erst);
+        let evt_seg = crate::mm::pfa::alloc_page().ok_or("event seg frame doesn't exist")?;
+        core::ptr::write_bytes(evt_seg as *mut u8, 0, 4096);
+        let erst = crate::mm::pfa::alloc_page().ok_or("erst frame doesn't exist")?;
+        core::ptr::write_bytes(erst as *mut u8, 0, 4096);
+        
         core::ptr::write_volatile(erst as *mut u64, evt_seg);
         core::ptr::write_volatile((erst + 8) as *mut u32, RING_TRBS as u32);
         core::ptr::write_volatile((erst + 12) as *mut u32, 0);
@@ -569,7 +571,7 @@ fn init_inner(devices: &[PciDevice]) -> Result<(), &'static str> {
             devices: [NONE; MAX_SLOTS_USED],
         };
 
-        x.command(0, TRB_NOOP_CMD << 10)?;
+        x.command(0, TRB_NOOP_CMD << 10).map_err(|_| "xHCI command failed")?;
 
         for p in 0..x.max_ports {
             let a = x.portsc(p);
@@ -579,24 +581,26 @@ fn init_inner(devices: &[PciDevice]) -> Result<(), &'static str> {
             let sc = mmio_read32(a);
             mmio_write32(a, (sc & PSC_KEEP) | PSC_PR);
         }
-        let mut spin = 0u64;
+        
+        let mut spin_port = 0u64;
         loop {
             let mut done = true;
             for p in 0..x.max_ports {
                 let v = mmio_read32(x.portsc(p));
                 if v & PSC_CCS != 0 && v & PSC_PR != 0 { done = false; }
             }
-        if done { break; }
-        spin += 1; if spin > SPIN_MAX { break; }
-        core::hint::spin_loop();
-    }
-    mdelay(15); // reset recovery
-    for p in 0..x.max_ports {
-        let v = mmio_read32(x.portsc(p));
-        if v & PSC_CCS != 0 {
-            mmio_write32(x.portsc(p), (v & PSC_KEEP) | PSC_PRC | PSC_CSC | PSC_PEC);
+            if done { break; }
+            spin_port += 1; 
+            if spin_port > SPIN_MAX { break; }
+            core::hint::spin_loop();
         }
-    }
+        mdelay(15); // reset recovery
+        for p in 0..x.max_ports {
+            let v = mmio_read32(x.portsc(p));
+            if v & PSC_CCS != 0 {
+                mmio_write32(x.portsc(p), (v & PSC_KEEP) | PSC_PRC | PSC_CSC | PSC_PEC);
+            }
+        }
 
         let mut nok = 0u32;
         for p in 0..x.max_ports {
@@ -604,13 +608,13 @@ fn init_inner(devices: &[PciDevice]) -> Result<(), &'static str> {
                 Ok(()) => nok += 1,
                 Err(e) => {
                     if e != "port bos" {
-                        ENUM_ERR_PTR.store(e.as_ptr() as u64, Ordering::Relaxed);
-                        ENUM_ERR_LEN.store(e.len() as u32, Ordering::Relaxed);
+                        ENUM_ERR_PTR.store(e.as_ptr() as u64, core::sync::atomic::Ordering::Relaxed);
+                        ENUM_ERR_LEN.store(e.len() as u32, core::sync::atomic::Ordering::Relaxed);
                     }
                 }
             }
         }
-        ENUM_OK.store(nok, Ordering::Relaxed);
+        ENUM_OK.store(nok, core::sync::atomic::Ordering::Relaxed);
         XHCI = Some(x);
     }
 
@@ -674,9 +678,9 @@ impl Xhci {
         let slot = ev.slot_id() as u8;
         if slot == 0 || (slot as usize) >= MAX_SLOTS_USED { return Err("gecersiz slot id"); }
 
-        let dev_ctx = pfa::alloc_frame().ok_or("dev ctx frame yok")?;
-        let input_ctx = pfa::alloc_frame().ok_or("input ctx frame yok")?;
-        let buf = pfa::alloc_frame().ok_or("dma buf frame yok")?;
+        let dev_ctx = pfa::alloc_page().ok_or("dev ctx frame yok")?;
+        let input_ctx = pfa::alloc_page().ok_or("input ctx frame yok")?;
+        let buf = pfa::alloc_page().ok_or("dma buf frame yok")?;
         unsafe {
             zero_frame(dev_ctx);
             zero_frame(input_ctx);
@@ -844,8 +848,8 @@ impl Xhci {
 
             let rin = Ring::new().ok_or("no bulk in ring")?;
             let rout = Ring::new().ok_or("no bulk out ring")?;
-            let msc_cmd = pfa::alloc_frame().ok_or("no msc cmd frame")?;
-            let msc_data = pfa::alloc_frame().ok_or("no msc data frame")?;
+            let msc_cmd = pfa::alloc_page().ok_or("no msc cmd frame")?;
+            let msc_data = pfa::alloc_page().ok_or("no msc data frame")?;
             unsafe { zero_frame(msc_cmd); zero_frame(msc_data); }
 
             let dci_in = ((ep_in & 0x0F) as u8) * 2 + 1;
