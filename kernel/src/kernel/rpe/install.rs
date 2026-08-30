@@ -1,12 +1,3 @@
-// RPE PAYLOAD
-// The payload (bootloader + kernel + userland) is embedded in the kernel image with
-// include_bytes!. Therefore, there is NO need for a USB storage drive
-// (xHCI) - even if xHCI doesn't work on the actual hardware,
-// installation is flawless. //
-// Makefile compiles in 2 stages:
-// Stage 1: stub payload -> normal (to be installed) kernel
-// Stage 2: actual payload embedded -> RPE kernel (going to USB)
-// ===============================================================
 use crate::fs::BlockDevice;
 
 static PAYLOAD_BOOT:   &[u8] = include_bytes!("payload/BOOTX64.EFI");
@@ -18,7 +9,6 @@ const EOC: u32 = 0x0FFF_FFFF;
 const DOT:    [u8; 11] = *b".          ";
 const DOTDOT: [u8; 11] = *b"..         ";
 
-// FAT32 Geometry
 #[derive(Clone, Copy)]
 struct Geom {
     bps: u32,
@@ -329,7 +319,6 @@ pub fn install(dev: &mut dyn BlockDevice, disk_sectors: u32, disk_kind: u8,
     let max_cluster = 2 + ((g.total_sectors as u64 - g.data_start) / g.spc as u64) as u32;
     let mut f = Fmt { dev, g, next_free: 3, max_cluster };
 
-    // STEP 0: bicimlendir
     cb(0, 0);
     f.format(cb)?;
 
@@ -338,22 +327,22 @@ pub fn install(dev: &mut dyn BlockDevice, disk_sectors: u32, disk_kind: u8,
     let rsys = f.make_dir(g.root_cluster, sn("RSYS"))?;
     let _apps = f.make_dir(g.root_cluster, sn("APPS"))?;
 
-    // STEP 1: onyukleyici
+    // bootloader
     cb(1, 0);
     f.write_data(PAYLOAD_BOOT, boot, sn3("BOOTX64", "EFI"), 1, cb)?;
 
-    // STEP 2: cekirdek
+    // kernel
     cb(2, 0);
     f.write_data(PAYLOAD_KERNEL, g.root_cluster, sn3("KERNEL", "ELF"), 2, cb)?;
     f.write_data(PAYLOAD_KERNEL, rsys, sn3("KERNEL", "ELF"), 2, cb)?;
 
-    // STEP 3: sistem dosyalari
+    // system files
     cb(3, 0);
     f.write_data(PAYLOAD_CORE, rsys, sn3("CORE", "BIN"), 3, cb)?;
     let reg = build_registry();
     f.write_data(&reg, rsys, sn3("REGISTRY", "DAT"), 3, cb)?;
 
-    // STEP 3.5: ESP'ye bootloader (FORMAT ETMEZ, sadece dosya ekler)
+    // esp bootloader
     if let Some((elba, esec)) = esp {
         cb(3, 60);
         let mut edev = crate::fs::offset::PartitionDevice::new(disk_kind, elba, esec);
