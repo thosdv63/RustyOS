@@ -29,7 +29,6 @@ impl Lapic {
     }
 
     pub unsafe fn enable(&self) {
-        // Install the Spurious Vector Register (Bit 8: APIC Enable, 0xFF: Vector No)
         let val = self.read(LAPIC_SPURIOUS);
         self.write(LAPIC_SPURIOUS, val | 0x100 | 0xFF);
     }
@@ -39,17 +38,8 @@ impl Lapic {
     }
 
     pub unsafe fn init_timer(&self, initial_count: u32) {
-        // Prepare Timer Divide Configuration Register (Divider = 16)
-        // Bits 0, 1, and 3 are used to set the value. 0x03 = Divide by 16.
         self.write(LAPIC_TIMER_DIV, 0x03);
-
-        // Prepare LVT Timer Register
-        // Bit 17: Timer Mode (0 = One-shot, 1 = Periodic, 2 = TSC-Deadline)
-        // Bits 0-7: Interrupt Vector (e.g., 0x20)
-        // 0x20000 = Periodic Mode, 0x20 = Vector Number
         self.write(LAPIC_TIMER, 0x20020); 
-
-        // Start the counter by typing Initial Count Register
         self.write(LAPIC_TIMER_INIT, initial_count);
     }
 
