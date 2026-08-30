@@ -44,11 +44,11 @@ impl ToPhys for (u64, u64) { fn phys(self) -> u64 { self.0 } }
 
 #[inline]
 fn virt_to_phys(v: u64) -> Option<u64> {
-    crate::mm::ptm::translate(v).map(|p| p.phys())
+    crate::mm::vmm::PageTableManager::active().translate(v)
 }
 
 fn init_pcm_buffer() {
-    if crate::mm::ptm::map_range(PCM_VIRT_BASE, PCM_PAGES, true).is_err() {
+    if crate::mm::vmm::map_range(PCM_VIRT_BASE, PCM_PAGES, true).is_err() {
         unsafe { PCM_VIRT = FALLBACK_PHYS; PCM_PHYS = FALLBACK_PHYS; PCM_CAP = FALLBACK_LEN; }
         dbg("[AUDIO] UYARI: map_range is not succesfull -> fallback\n");
         return;
