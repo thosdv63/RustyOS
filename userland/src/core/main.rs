@@ -49,20 +49,21 @@ unsafe extern "C" {
 #[unsafe(naked)]
 pub unsafe extern "C" fn _start() -> ! {
     naked_asm!(
-        "cld",
-        "lea rdi, [rip + {bss_s}]",
-        "lea rcx, [rip + {bss_e}]",
-        "sub rcx, rdi",
-        "xor eax, eax",
-        "rep stosb",
-        "and rsp, -16",
-        "xor ebp, ebp",
-        "call {m}",
-        "ud2",
-        bss_s = sym __bss_start,
-        bss_e = sym _end,
-        m = sym userland_main,
-    );
+    "cld",
+    "lea rdi, [rip + {bss_s}]",
+    "lea rcx, [rip + {bss_e}]",
+    "sub rcx, rdi",
+    "xor eax, eax",
+    "rep stosb",
+    "and rsp, -16",
+    "sub rsp, 8", // call sonrasında RSP % 16 == 0 kalması için zorunlu
+    "xor ebp, ebp",
+    "call {m}",
+    "ud2",
+    bss_s = sym __bss_start,
+    bss_e = sym _end,
+    m = sym userland_main,
+);
 }
 
 extern "C" fn userland_main() -> ! {
