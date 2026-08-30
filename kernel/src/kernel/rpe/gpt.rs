@@ -1,9 +1,3 @@
-// ============================================================
-// ENTRY POINT: Add bootloader to ESP (DOES NOT FORMAT)
-// dev = ESP's PartitionDevice
-// Returns: true = \EFI\BOOT also written to fallback (visible on F12)
-// false = fallback WAS FULL, not touched (efibootmgr required)
-// ==============================================================
 use alloc::vec::Vec;
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -20,12 +14,12 @@ pub const FS_EMPTY: u8 = 3;
 pub struct Partition {
     pub index: u32,
     pub first_lba: u64,
-    pub last_lba: u64,     // include
-    pub sectors: u64,      // last-first+1
-    pub name: String,      // GPT tag (UTF-16 -> ASCII)
-    pub label: &'static str, // human read type
+    pub last_lba: u64,    
+    pub sectors: u64,      
+    pub name: String,      
+    pub label: &'static str,
     pub fs_kind: u8,
-    pub protected: bool,   // dont change if is true
+    pub protected: bool,   
 }
 
 pub struct DiskLayout {
