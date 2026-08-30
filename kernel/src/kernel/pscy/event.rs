@@ -14,11 +14,9 @@ static mut QUEUE: [Event; QUEUE_SIZE] = [Event { kind: 0, data1: 0, data2: 0, da
 static mut HEAD: usize = 0; // writing position
 static mut TAIL: usize = 0; // reading position
 
-// Add event (calls from kernel interrupt)
 pub unsafe fn push(ev: Event) {
     let next = (HEAD + 1) % QUEUE_SIZE;
     if next == TAIL {
-        // queue is full, discard the oldest one (advance the tail)
         TAIL = (TAIL + 1) % QUEUE_SIZE;
     }
     QUEUE[HEAD] = ev;
@@ -27,7 +25,7 @@ pub unsafe fn push(ev: Event) {
 
 pub unsafe fn pop() -> Option<Event> {
     if HEAD == TAIL {
-        return None; // empty
+        return None;
     }
     let ev = QUEUE[TAIL];
     TAIL = (TAIL + 1) % QUEUE_SIZE;
