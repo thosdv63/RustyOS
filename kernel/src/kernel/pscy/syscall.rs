@@ -62,7 +62,7 @@ pub extern "C" fn syscall_handler_rust(
     match sys_num {
         0 => {
             let r = unsafe { crate::renderer() };
-            let real_ptr = arg1 + 0x400000;
+            let real_ptr = arg1; // + 0x400000 KALDIRILDI
             let s = unsafe { core::slice::from_raw_parts(real_ptr as *const u8, arg2 as usize) };
             if let Ok(str) = core::str::from_utf8(s) {
                 r.text(str);
@@ -90,7 +90,7 @@ pub extern "C" fn syscall_handler_rust(
         3 => { // sys_poll_event
                 let real_ptr = arg1 as *mut i32;
                 crate::drivers::usb::xhci::poll();
-                unsafe { crate::drivers::ps2::mouse::poll(); }
+                unsafe { crate::drivers::ps2::mouse::poll(); } // <-- PS/2 Polling Eklendi
                 crate::POLL_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 crate::drivers::audio::tick(); // close stream when sound end
                 unsafe {
@@ -180,8 +180,7 @@ pub extern "C" fn syscall_handler_rust(
             crate::kernel::rgst::fsops::write_file_call(buf)
         },
         18 => { // sys_play_startup: startup sound
-            // You can add custom startup sound here
-           // crate::drivers::audio::play(crate::STARTUPSOUND);
+            crate::drivers::audio::play(crate::WIN7_STARTUP_SOUND);
             0
         },
         19 => { // sys_play_file: buf = [u16 len][path]
