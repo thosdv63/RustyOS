@@ -1,197 +1,167 @@
-use common::bootinfo::BootInfo;
-use core::slice;
-use x86_64::structures::paging::{FrameAllocator as X86FrameAllocator, PhysFrame, Size4KiB};
-use x86_64::PhysAddr;
+use spin::Mutex;
+use common::bootinfo::MemoryRegion;
 
-const FRAME_SIZE: u64 = 4096;
-const MAX_RAM: u64 = 0x1_0000_0000;
-const DMA_SAFE_START_FRAME: u64 = 0x500000 / FRAME_SIZE;
+pub const PAGE_SIZE: u64 = 4096;
+pub const PAGE_SIZE_2MB: u64 = 2 * 1024 * 1024;
+pub const PAGE_SIZE_1GB: u64 = 1024 * 1024 * 1024;
 
-pub struct FrameAllocator {
-    bitmap: *mut u8,
-    bitmap_size: usize,
-    total_frames: u64,
-    used_frames: u64,
-    highest_addr: u64,
-    last_alloc_frame: u64,
+pub const HHDM_OFFSET: u64 = 0xFFFF_8000_0000_0000;
+
+pub const MAX_ORDER: usize = 20; 
+
+#[repr(C)]
+pub struct FreeBlock {
+    pub next: Option<*mut FreeBlock>,
 }
 
-static mut ALLOCATOR: FrameAllocator = FrameAllocator {
-    bitmap: core::ptr::null_mut(),
-    bitmap_size: 0,
-    total_frames: 0,
-    used_frames: 0,
-    highest_addr: 0,
-    last_alloc_frame: DMA_SAFE_START_FRAME,
-};
-
-unsafe fn set_used(frame: u64) {
-    let byte = (frame / 8) as usize;
-    let bit = (frame % 8) as u8;
-    *ALLOCATOR.bitmap.add(byte) |= 1 << bit;
+pub struct FreeList {
+    pub head: Option<*mut FreeBlock>,
 }
 
-unsafe fn set_free(frame: u64) {
-    let byte = (frame / 8) as usize;
-    let bit = (frame % 8) as u8;
-    *ALLOCATOR.bitmap.add(byte) &= !(1 << bit);
-}
-
-unsafe fn is_used(frame: u64) -> bool {
-    let byte = (frame / 8) as usize;
-    let bit = (frame % 8) as u8;
-    (*ALLOCATOR.bitmap.add(byte) >> bit) & 1 == 1
-}
-
-pub fn init(boot_info: *const BootInfo) {
-    unsafe {
-        let r = crate::renderer();
-        use core::fmt::Write;
-
-        let info = &*boot_info;
-
-        if info.memory_region_count == 0 || info.memory_region_count > 1024 {
-            let _ = write!(r, "[PFA] Incorrect region count! Stopped.\n");
-            return;
-        }
-
-        let regions = slice::from_raw_parts(
-            info.memory_regions,
-            info.memory_region_count as usize,
-        );
-
-        let mut highest: u64 = 0;
-        for rg in regions {
-            let end = rg.start + rg.page_count * FRAME_SIZE;
-            if rg.start >= MAX_RAM { continue; }
-            if end > highest && end <= MAX_RAM { highest = end; }
-        }
-
-        ALLOCATOR.highest_addr = highest;
-        ALLOCATOR.total_frames = highest / FRAME_SIZE;
-
-        let bitmap_size = (ALLOCATOR.total_frames as usize + 7) / 8;
-        ALLOCATOR.bitmap_size = bitmap_size;
-
-        let bitmap_frames_needed = (bitmap_size as u64 + FRAME_SIZE - 1) / FRAME_SIZE;
-        let mut bitmap_addr: u64 = 0;
-        let mut best_size: u64 = 0;
-        
-        for rg in regions {
-            if rg.usable == 1 && rg.start < MAX_RAM && rg.page_count > best_size {
-                if rg.page_count >= bitmap_frames_needed {
-                    best_size = rg.page_count;
-                    bitmap_addr = rg.start;
-                }
-            }
-        }
-
-        if bitmap_addr == 0 {
-            let _ = write!(r, "[PFA] No space found for bitmap! Stopped.\n");
-            return;
-        }
-        ALLOCATOR.bitmap = bitmap_addr as *mut u8;
-
-        core::ptr::write_bytes(ALLOCATOR.bitmap, 0xFF, bitmap_size);
-        ALLOCATOR.used_frames = ALLOCATOR.total_frames;
-
-        let mut freed: u64 = 0;
-        for rg in regions {
-            if rg.usable == 1 && rg.start < MAX_RAM {
-                let start_frame = rg.start / FRAME_SIZE;
-                for f in 0..rg.page_count {
-                    let frame = start_frame + f;
-                    if frame >= ALLOCATOR.total_frames { break; }
-                    if is_used(frame) {
-                        set_free(frame);
-                        freed += 1;
-                    }
-                }
-            }
-        }
-        ALLOCATOR.used_frames -= freed;
-
-        let bitmap_start_frame = bitmap_addr / FRAME_SIZE;
-        for f in 0..bitmap_frames_needed {
-            if !is_used(bitmap_start_frame + f) {
-                set_used(bitmap_start_frame + f);
-                ALLOCATOR.used_frames += 1;
-            }
-        }
-        if !is_used(0) {
-            set_used(0);
-            ALLOCATOR.used_frames += 1;
-        }
-
-        let reserve_end = 0x500000u64 / FRAME_SIZE;
-        for frame in 0..reserve_end {
-            if frame >= ALLOCATOR.total_frames { break; }
-            if !is_used(frame) {
-                set_used(frame);
-                ALLOCATOR.used_frames += 1;
-            }
-        }
-        
-        let snd_start = 0x0100_0000u64 / FRAME_SIZE;
-        let snd_end   = 0x0110_0000u64 / FRAME_SIZE;
-        for frame in snd_start..snd_end {
-            if frame >= ALLOCATOR.total_frames { break; }
-            if !is_used(frame) {
-                set_used(frame);
-                ALLOCATOR.used_frames += 1;
-            }
-        }
-
-        ALLOCATOR.last_alloc_frame = DMA_SAFE_START_FRAME;
+impl FreeList {
+    pub const fn new() -> Self {
+        Self { head: None }
     }
 }
 
-pub fn alloc_frame() -> Option<u64> {
-    unsafe {
-        let start = ALLOCATOR.last_alloc_frame;
+unsafe impl Send for FreeList {}
+unsafe impl Sync for FreeList {}
+
+pub struct BuddyAllocator {
+    pub free_lists: [FreeList; MAX_ORDER + 1],
+    pub total_memory: u64,
+    pub free_memory: u64,
+}
+
+pub static PFA: Mutex<BuddyAllocator> = Mutex::new(BuddyAllocator::new());
+
+impl BuddyAllocator {
+    pub const fn new() -> Self {
+        Self {
+            free_lists: [const { FreeList::new() }; MAX_ORDER + 1],
+            total_memory: 0,
+            free_memory: 0
+        }
+    }
+
+    pub fn init_regions(&mut self, regions: *const MemoryRegion, count: usize) {
+        let regions_slice = unsafe { core::slice::from_raw_parts(regions, count) };
+
+        for region in regions_slice {
+            if region.usable != 1 {
+                continue;
+            }
+
+            let start_bytes = region.start;
+            let end_bytes = region.start.saturating_add(region.page_count * PAGE_SIZE);
+
+            let mut base = (start_bytes + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+            let end = end_bytes & !(PAGE_SIZE - 1);
+            if base < 0x100000 { 
+            base = 0x100000; 
+            }
+
+            while base < end {
+                let remaining_pages = (end - base) / PAGE_SIZE;
+                let page_idx = base / PAGE_SIZE;
+
+                let align_order = if page_idx == 0 {
+                    MAX_ORDER
+                } else {
+                    page_idx.trailing_zeros() as usize
+                };
+
+                let size_order = (63 - remaining_pages.leading_zeros()) as usize;
+                let order = align_order.min(size_order).min(MAX_ORDER);
+                let block_size = PAGE_SIZE << order;
+
+                self.push_to_list(base, order);
+                self.total_memory += block_size;
+                self.free_memory += block_size;
+
+                base += block_size;
+            }
+        }
+    }
+
+    pub fn alloc_pages(&mut self, order: usize) -> Option<u64> {
+        if order > MAX_ORDER { return None; }
         
-        for frame in start..ALLOCATOR.total_frames {
-            if !is_used(frame) {
-                set_used(frame);
-                ALLOCATOR.used_frames += 1;
-                ALLOCATOR.last_alloc_frame = frame + 1;
-                return Some(frame * FRAME_SIZE);
+        for mut current_order in order..=MAX_ORDER {
+            if let Some(ptr) = self.free_lists[current_order].head {
+                self.free_lists[current_order].head = unsafe { (*ptr).next };
+                self.free_memory -= PAGE_SIZE << order;
+
+                let phys_addr = (ptr as u64) - HHDM_OFFSET;
+
+                while current_order > order {
+                    current_order -= 1;
+                    let buddy_addr = phys_addr + (PAGE_SIZE << current_order);
+                    self.push_to_list(buddy_addr, current_order);
+                }
+                return Some(phys_addr);
             }
         }
-
-        for frame in DMA_SAFE_START_FRAME..start {
-            if !is_used(frame) {
-                set_used(frame);
-                ALLOCATOR.used_frames += 1;
-                ALLOCATOR.last_alloc_frame = frame + 1;
-                return Some(frame * FRAME_SIZE);
-            }
-        }
-
         None
     }
-}
 
-pub fn free_frame(addr: u64) {
-    unsafe {
-        let frame = addr / FRAME_SIZE;
-        if is_used(frame) {
-            set_free(frame);
-            ALLOCATOR.used_frames -= 1;
-            
-            if frame < ALLOCATOR.last_alloc_frame && frame >= DMA_SAFE_START_FRAME {
-                ALLOCATOR.last_alloc_frame = frame;
+    pub fn free_pages(&mut self, mut addr: u64, mut order: usize) {
+        self.free_memory += PAGE_SIZE << order;
+
+        while order < MAX_ORDER {
+            let buddy_addr = self.buddy_of(addr, order);
+            if self.remove_from_list(buddy_addr, order) {
+                addr = core::cmp::min(addr, buddy_addr);
+                order += 1;
+            } else {
+                break;
             }
         }
+        self.push_to_list(addr, order);
+    }
+
+    fn buddy_of(&self, addr: u64, order: usize) -> u64 {
+        let block_size = PAGE_SIZE << order;
+        addr ^ block_size
+    }
+
+    fn push_to_list(&mut self, addr: u64, order: usize) {
+        let ptr = (addr + HHDM_OFFSET) as *mut FreeBlock;
+        unsafe {
+            (*ptr).next = self.free_lists[order].head;
+            self.free_lists[order].head = Some(ptr);
+        };
+    }
+
+    fn remove_from_list(&mut self, addr: u64, order: usize) -> bool {
+        let target_ptr = (addr + HHDM_OFFSET) as *mut FreeBlock;
+        let mut current = self.free_lists[order].head;
+        let mut prev: Option<*mut FreeBlock> = None;
+
+        while let Some(curr_ptr) = current {
+            if curr_ptr == target_ptr {
+                unsafe {
+                    if let Some(prev_ptr) = prev {
+                        (*prev_ptr).next = (*curr_ptr).next;
+                    } else {
+                        self.free_lists[order].head = (*curr_ptr).next;
+                    }
+                }
+                return true;
+            }
+            prev = Some(curr_ptr);
+            unsafe {
+                current = (*curr_ptr).next;
+            }
+        }
+        false
     }
 }
 
-pub struct PfaWrapper;
-
-unsafe impl X86FrameAllocator<Size4KiB> for PfaWrapper {
-    fn allocate_frame(&mut self) -> Option<PhysFrame<Size4KiB>> {
-        alloc_frame().map(|addr| {
-            PhysFrame::containing_address(PhysAddr::new(addr))
-        })
-    }
-}
+pub fn init(regions: *const MemoryRegion, count: usize) { PFA.lock().init_regions(regions, count); }
+pub fn alloc_page() -> Option<u64> { PFA.lock().alloc_pages(0) }
+pub fn alloc_2mb() -> Option<u64> { PFA.lock().alloc_pages(9) }
+pub fn alloc_1gb() -> Option<u64> { PFA.lock().alloc_pages(18) }
+pub fn free_page(addr: u64) { PFA.lock().free_pages(addr, 0); }
+pub fn free_2mb(addr: u64) { PFA.lock().free_pages(addr, 9); }
+pub fn free_1gb(addr: u64) { PFA.lock().free_pages(addr, 18); }
