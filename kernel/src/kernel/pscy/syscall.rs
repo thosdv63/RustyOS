@@ -3,7 +3,6 @@ use x86_64::registers::model_specific::{Efer, EferFlags, LStar, Star, KernelGsBa
 use x86_64::registers::rflags::RFlags;
 use x86_64::VirtAddr;
 
-// kernel stack for sse
 #[repr(align(16))]
 struct KStack([u8; 32768]);
 
@@ -34,15 +33,14 @@ pub unsafe extern "C" fn syscall_entry() {
         "mov r10, rsp",
         "mov rsp, gs:[0]",
 
-        "push r10",               // user RSP
-        "push r11",               // user RFLAGS
-        "push rcx",               // user RIP
+        "push r10",             
+        "push r11",             
+        "push rcx",           
 
         "mov rdx, rsi",
         "mov rsi, rdi",
         "mov rdi, rax",
 
-        // 3 push = 24 byte -> rsp%16 == 8. SysV: before call it should be rsp%16 == 0
         "sub rsp, 8",
         "call syscall_handler_rust",
         "add rsp, 8",
@@ -62,7 +60,7 @@ pub extern "C" fn syscall_handler_rust(
     match sys_num {
         0 => {
             let r = unsafe { crate::renderer() };
-            let real_ptr = arg1; // + 0x400000 KALDIRILDI
+            let real_ptr = arg1;
             let s = unsafe { core::slice::from_raw_parts(real_ptr as *const u8, arg2 as usize) };
             if let Ok(str) = core::str::from_utf8(s) {
                 r.text(str);
@@ -90,7 +88,7 @@ pub extern "C" fn syscall_handler_rust(
         3 => { // sys_poll_event
                 let real_ptr = arg1 as *mut i32;
                 crate::drivers::usb::xhci::poll();
-                unsafe { crate::drivers::ps2::mouse::poll(); } // <-- PS/2 Polling Eklendi
+                unsafe { crate::drivers::ps2::mouse::poll(); }
                 crate::POLL_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 crate::drivers::audio::tick(); // close stream when sound end
                 unsafe {
@@ -180,7 +178,7 @@ pub extern "C" fn syscall_handler_rust(
             crate::kernel::rgst::fsops::write_file_call(buf)
         },
         18 => { // sys_play_startup: startup sound
-            crate::drivers::audio::play(crate::WIN7_STARTUP_SOUND);
+            // crate::drivers::audio::play(crate::STARTUP_SOUND);
             0
         },
         19 => { // sys_play_file: buf = [u16 len][path]
