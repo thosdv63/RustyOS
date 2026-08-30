@@ -1,15 +1,14 @@
 use crate::drivers::io::{mmio_read32, mmio_write32};
 use crate::drivers::pci::{self, PciDevice};
 use crate::mm::pfa;
+use crate::mm::pfa::HHDM_OFFSET;
 use core::sync::atomic::{fence, Ordering};
 
-// AHCI HBA Register Offsets
 const HBA_CAP: u64 = 0x00;     
 const HBA_GHC: u64 = 0x04;     
 const HBA_IS: u64 = 0x08;      
 const HBA_PI: u64 = 0x0C;    
 
-// Port Register Offsets
 const PORT_CLB: u64 = 0x00;   
 const PORT_FB: u64 = 0x08;     
 const PORT_IS: u64 = 0x10;    
@@ -22,14 +21,12 @@ const PORT_SCTL: u64 = 0x2C;
 const PORT_SERR: u64 = 0x30;  
 const PORT_CI: u64 = 0x38;    
 
-// Port CMD bits
 const CMD_ST: u32 = 0x0001;   
 const CMD_FRE: u32 = 0x0010;  
 const CMD_FR: u32 = 0x4000;   
 const CMD_CR: u32 = 0x8000;    
 
-// SATA signature
-const SIG_ATA: u32 = 0x00000101; // SATA disk
+const SIG_ATA: u32 = 0x00000101; 
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -45,9 +42,9 @@ struct CmdHeader {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FisRegH2D {
-    fis_type: u8,      // 0x27
-    pmport_c: u8,      // bit 7 = command/control
-    command: u8,       // ATA command
+    fis_type: u8,
+    pmport_c: u8,
+    command: u8,
     featurel: u8,
     lba0: u8, lba1: u8, lba2: u8,
     device: u8,
@@ -122,7 +119,7 @@ impl AhciDevice {
         }
         mmio_write32(self.port_reg(PORT_IS), 0xFFFFFFFF);
 
-        let cmd_header = self.clb as *mut CmdHeader;
+        let cmd_header = (self.clb + HHDM_OFFSET) as *mut CmdHeader;
         let header = CmdHeader {
             flags: (5 & 0x1F) | if write { 1 << 6 } else { 0 },
             prdtl: pages.len() as u16,
@@ -133,9 +130,9 @@ impl AhciDevice {
         };
         core::ptr::write_volatile(cmd_header, header);
 
-        core::ptr::write_bytes(self.ctba as *mut u8, 0, 256);
+        core::ptr::write_bytes((self.ctba + HHDM_OFFSET) as *mut u8, 0, 256);
 
-        let fis = (self.ctba + CT_FIS_OFFSET as u64) as *mut FisRegH2D;
+        let fis = (self.ctba + HHDM_OFFSET + CT_FIS_OFFSET as u64) as *mut FisRegH2D;
         let cmd_fis = FisRegH2D {
             fis_type: 0x27,          
             pmport_c: 1 << 7,        
@@ -144,7 +141,7 @@ impl AhciDevice {
             lba0: (lba & 0xFF) as u8,
             lba1: ((lba >> 8) & 0xFF) as u8,
             lba2: ((lba >> 16) & 0xFF) as u8,
-            device: 1 << 6,           // LBA mode
+            device: 1 << 6,
             lba3: ((lba >> 24) & 0xFF) as u8,
             lba4: ((lba >> 32) & 0xFF) as u8,
             lba5: ((lba >> 40) & 0xFF) as u8,
@@ -157,7 +154,7 @@ impl AhciDevice {
         };
         core::ptr::write_volatile(fis, cmd_fis);
 
-        let prdt_ptr = (self.ctba + CT_PRDT_OFFSET as u64) as *mut PrdtEntry;
+        let prdt_ptr = (self.ctba + HHDM_OFFSET + CT_PRDT_OFFSET as u64) as *mut PrdtEntry;
         let mut remaining_bytes = (count as u32) * self.block_size;
         
         for (i, &page_phys) in pages.iter().enumerate() {
@@ -210,10 +207,11 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
         return Err("ABAR (BAR5) is zero");
     }
 
+    let mut ptm = crate::mm::vmm::PageTableManager::active();
     for i in 0..2u64 {
         let addr = abar + i * 0x1000;
-        if crate::mm::ptm::translate(addr).is_none() {
-            crate::mm::ptm::map_page(addr, addr, true)?;
+        if ptm.translate(addr).is_none() {
+            ptm.map(addr, addr, 4096, true, false, true, false);
         }
     }
 
@@ -229,8 +227,8 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
 
             let port_base = abar + 0x100 + (port as u64) * 0x80;
             let ssts = mmio_read32(port_base + PORT_SSTS);
-            let det = ssts & 0x0F;        // device detection
-            let ipm = (ssts >> 8) & 0x0F; // interface power management
+            let det = ssts & 0x0F;
+            let ipm = (ssts >> 8) & 0x0F;
 
             if det == 3 && ipm == 1 {
                 let sig = mmio_read32(port_base + PORT_SIG);
@@ -246,12 +244,12 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
         }
         let port = found_port as u32;
 
-        let clb = pfa::alloc_frame().ok_or("no CLB frame")?;
-        let fb = pfa::alloc_frame().ok_or("no FB frame")?;
-        let ctba = pfa::alloc_frame().ok_or("no CT frame")?;
-        core::ptr::write_bytes(clb as *mut u8, 0, 4096);
-        core::ptr::write_bytes(fb as *mut u8, 0, 4096);
-        core::ptr::write_bytes(ctba as *mut u8, 0, 4096);
+        let clb = pfa::alloc_page().ok_or("no CLB page")?;
+        let fb = pfa::alloc_page().ok_or("no FB page")?;
+        let ctba = pfa::alloc_page().ok_or("no CT page")?;
+        core::ptr::write_bytes((clb + HHDM_OFFSET) as *mut u8, 0, 4096);
+        core::ptr::write_bytes((fb + HHDM_OFFSET) as *mut u8, 0, 4096);
+        core::ptr::write_bytes((ctba + HHDM_OFFSET) as *mut u8, 0, 4096);
 
         let mut dev = AhciDevice {
             abar, port, clb, fb, ctba,
@@ -267,29 +265,29 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
         mmio_write32(dev.port_reg(PORT_SERR), 0xFFFFFFFF);
         dev.start_port();
 
-        let identify_buf = pfa::alloc_frame().ok_or("no identify frame")?;
-        core::ptr::write_bytes(identify_buf as *mut u8, 0, 4096);
+        let identify_buf = pfa::alloc_page().ok_or("no identify page")?;
+        core::ptr::write_bytes((identify_buf + HHDM_OFFSET) as *mut u8, 0, 4096);
 
         mmio_write32(dev.port_reg(PORT_IS), 0xFFFFFFFF);
-        let cmd_header = dev.clb as *mut CmdHeader;
+        let cmd_header = (dev.clb + HHDM_OFFSET) as *mut CmdHeader;
         core::ptr::write_volatile(cmd_header, CmdHeader {
-            flags: 5 & 0x1F, // read
+            flags: 5 & 0x1F,
             prdtl: 1,
             prdbc: 0,
             ctba: (dev.ctba & 0xFFFF_FFFF) as u32,
             ctba_upper: (dev.ctba >> 32) as u32,
             _reserved: [0; 4],
         });
-        core::ptr::write_bytes(dev.ctba as *mut u8, 0, 256);
-        let fis = (dev.ctba + CT_FIS_OFFSET as u64) as *mut FisRegH2D;
+        core::ptr::write_bytes((dev.ctba + HHDM_OFFSET) as *mut u8, 0, 256);
+        let fis = (dev.ctba + HHDM_OFFSET + CT_FIS_OFFSET as u64) as *mut FisRegH2D;
         core::ptr::write_volatile(fis, FisRegH2D {
             fis_type: 0x27, pmport_c: 1 << 7,
-            command: 0xEC, // IDENTIFY DEVICE
+            command: 0xEC,
             featurel: 0, lba0: 0, lba1: 0, lba2: 0, device: 0,
             lba3: 0, lba4: 0, lba5: 0, featureh: 0,
             countl: 0, counth: 0, icc: 0, control: 0, _reserved: [0; 4],
         });
-        let prdt = (dev.ctba + CT_PRDT_OFFSET as u64) as *mut PrdtEntry;
+        let prdt = (dev.ctba + HHDM_OFFSET + CT_PRDT_OFFSET as u64) as *mut PrdtEntry;
         core::ptr::write_volatile(prdt, PrdtEntry {
             dba: (identify_buf & 0xFFFF_FFFF) as u32,
             dba_upper: (identify_buf >> 32) as u32,
@@ -297,7 +295,6 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
             dbc: (512 - 1) & 0x3FFFFF,
         });
         fence(Ordering::SeqCst);
-        // wait + publish
         let mut spin = 0;
         while (mmio_read32(dev.port_reg(PORT_TFD)) & 0x88) != 0 {
             spin += 1; if spin > 1_000_000 { break; } core::hint::spin_loop();
@@ -309,9 +306,9 @@ pub fn init(devices: &[PciDevice]) -> Result<(), &'static str> {
             core::hint::spin_loop();
         }
 
-        let lba48 = core::ptr::read_volatile((identify_buf + 200) as *const u64);
+        let lba48 = core::ptr::read_volatile((identify_buf + HHDM_OFFSET + 200) as *const u64);
         dev.block_count = lba48;
-        pfa::free_frame(identify_buf);
+        pfa::free_page(identify_buf);
 
         AHCI = Some(dev);
     }
@@ -341,11 +338,11 @@ pub fn read_block(lba: u64, buf: &mut [u8]) -> Result<(), &'static str> {
 
         let mut pages = [0u64; 512];
         for i in 0..page_count {
-            if let Some(frame) = pfa::alloc_frame() {
+            if let Some(frame) = pfa::alloc_page() {
                 pages[i] = frame;
             } else {
                 for j in 0..i {
-                    pfa::free_frame(pages[j]);
+                    pfa::free_page(pages[j]);
                 }
                 return Err("no dma frame");
             }
@@ -358,7 +355,7 @@ pub fn read_block(lba: u64, buf: &mut [u8]) -> Result<(), &'static str> {
             for i in 0..page_count {
                 let copy_len = core::cmp::min(remaining, 4096);
                 core::ptr::copy(
-                    pages[i] as *const u8,
+                    (pages[i] + HHDM_OFFSET) as *const u8,
                     buf.as_mut_ptr().add(offset),
                     copy_len,
                 );
@@ -368,7 +365,7 @@ pub fn read_block(lba: u64, buf: &mut [u8]) -> Result<(), &'static str> {
         }
 
         for i in 0..page_count {
-            pfa::free_frame(pages[i]);
+            pfa::free_page(pages[i]);
         }
 
         result
@@ -390,11 +387,11 @@ pub fn write_block(lba: u64, buf: &[u8]) -> Result<(), &'static str> {
 
         let mut pages = [0u64; 512];
         for i in 0..page_count {
-            if let Some(frame) = pfa::alloc_frame() {
+            if let Some(frame) = pfa::alloc_page() {
                 pages[i] = frame;
             } else {
                 for j in 0..i {
-                    pfa::free_frame(pages[j]);
+                    pfa::free_page(pages[j]);
                 }
                 return Err("no dma frame");
             }
@@ -406,7 +403,7 @@ pub fn write_block(lba: u64, buf: &[u8]) -> Result<(), &'static str> {
             let copy_len = core::cmp::min(remaining, 4096);
             core::ptr::copy(
                 buf.as_ptr().add(offset),
-                pages[i] as *mut u8,
+                (pages[i] + HHDM_OFFSET) as *mut u8,
                 copy_len,
             );
             offset += copy_len;
@@ -415,7 +412,7 @@ pub fn write_block(lba: u64, buf: &[u8]) -> Result<(), &'static str> {
 
         let result = dev.run_command(lba, &pages[0..page_count], count, true);
         for i in 0..page_count {
-            pfa::free_frame(pages[i]);
+            pfa::free_page(pages[i]);
         }
 
         result
