@@ -1,11 +1,9 @@
 use crate::drivers::usb::{PROTO_KEYBOARD, PROTO_MOUSE};
 use crate::kernel::pscy::event::{self, Event};
 
-// Keyboard
 static mut PREV_KEYS: [u8; 6] = [0; 6];
 static mut CAPS: bool = false;
 
-// HID usage -> (normal, shift)  ; index = usage - 0x04
 const KEYMAP: [(char, char); 0x39 - 0x04] = [
     ('a','A'),('b','B'),('c','C'),('d','D'),('e','E'),('f','F'),('g','G'),('h','H'),
     ('i','I'),('j','J'),('k','K'),('l','L'),('m','M'),('n','N'),('o','O'),('p','P'),
@@ -46,7 +44,6 @@ unsafe fn keyboard_report(d: &[u8]) {
     let modi = d[0];
     let shift = (modi & 0x02) != 0 || (modi & 0x20) != 0;
 
-    // Caps Lock (0x39) kenar tespiti
     let caps_now = d[2..8].iter().any(|&k| k == 0x39);
     let caps_prev = PREV_KEYS.iter().any(|&k| k == 0x39);
     if caps_now && !caps_prev { CAPS = !CAPS; }
